@@ -289,7 +289,8 @@ export default async function handler(req, res) {
       const currentById = new Map(current.map(account => [String(account.id), account]));
       const seenIds = new Set();
       const seenNames = new Set();
-      const records = [];
+      const existingRecords = [];
+      const newRecords = [];
 
       for (const account of accounts) {
         const id = String(account?.id || '');
@@ -307,7 +308,7 @@ export default async function handler(req, res) {
         if (url.protocol !== 'https:' || url.hostname !== 'www.myfxbook.com') return res.status(400).json({ message: `${name}: Myfxbook URL must use https://www.myfxbook.com` });
 
         const existing = currentById.get(id);
-        records.push({
+        const record = {
           ...(existing ? { id: existing.id } : {}),
           kind: 'performance',
           name,
@@ -318,14 +319,20 @@ export default async function handler(req, res) {
           server: account.server.trim(),
           myfxbook_url: account.myfxbook_url.trim(),
           active: true
-        });
+        };
+        (existing ? existingRecords : newRecords).push(record);
       }
 
       let saved = [];
-      if (records.length) {
-        const { data, error } = await supabase.from('accounts').upsert(records).select('*');
+      if (existingRecords.length) {
+        const { data, error } = await supabase.from('accounts').upsert(existingRecords).select('*');
         if (error) throw error;
         saved = data;
+      }
+      if (newRecords.length) {
+        const { data, error } = await supabase.from('accounts').insert(newRecords).select('*');
+        if (error) throw error;
+        saved = [...saved, ...data];
       }
       const removedIds = current.filter(account => !seenIds.has(String(account.id))).map(account => account.id);
       if (removedIds.length) {
