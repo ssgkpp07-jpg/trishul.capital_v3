@@ -214,7 +214,7 @@ async function PortfolioPage(){
 }
 async function ContactPage(){
  let c={};try{c=await api('/api/settings/contact')}catch{}
- const email = 'mailto:mailtotrishulcapital@gmail.com?subject=Hi%20Trishul%20Capital&body=Hello%20Trishul%20Capital%2C%0A%0AI%20am%20interested%20to%20know%20more%20about%20your%20Forex%20Account%20Management%20Services.';
+ const email = 'https://mail.google.com/mail/u/0/?fs=1&to=mailtotrishulcapital@gmail.com&su=Hi+Trishul+Capital&body=Hello+Trishul+Capital,%0A%0AI+am+interested+to+know+more+about+your+Forex+Account+Management+Services.&tf=cm';
  const whatsapp = 'https://wa.me/919787801006?text=Hi%20...%20I%27m%20interested%20to%20know%20more%20about%20your%20Forex%20Account%20Management%20Services...';
  const instagram = 'https://www.instagram.com/trishulcapital';
  const telegram = 'https://t.me/Trishul_Capital';
@@ -316,7 +316,7 @@ async function render(){
    const instagramIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.37 2h9.26A5.38 5.38 0 0 1 22 7.37v9.26A5.38 5.38 0 0 1 16.63 22H7.37A5.38 5.38 0 0 1 2 16.63V7.37A5.38 5.38 0 0 1 7.37 2Zm-.2 1.81a3.35 3.35 0 0 0-3.36 3.36v9.66a3.35 3.35 0 0 0 3.36 3.36h9.66a3.35 3.35 0 0 0 3.36-3.36V7.17a3.35 3.35 0 0 0-3.36-3.36H7.17ZM17.59 5.17a1.21 1.21 0 1 1 0 2.42 1.21 1.21 0 0 1 0-2.42ZM12 6.89A5.11 5.11 0 1 1 6.89 12 5.11 5.11 0 0 1 12 6.89Zm0 1.81A3.3 3.3 0 1 0 15.3 12 3.3 3.3 0 0 0 12 8.7Z" fill="currentColor"/></svg>';
    const telegramIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.42 4.33a1.56 1.56 0 0 0-1.62-.22L2.47 10.8a1.1 1.1 0 0 0 .08 2.07l4.32 1.35 1.67 5.12a1.1 1.1 0 0 0 1.84.43l2.45-2.61 4.25 3.11a1.56 1.56 0 0 0 2.43-.92l2.22-13.48a1.56 1.56 0 0 0-.31-1.53ZM8.18 13.61l8.72-5.5-7.31 6.97-.29 2.28-1.12-3.43Z" fill="currentColor"/></svg>';
    const footerLinks = [
-     { label: 'Email', icon: emailIcon, url: 'mailto:mailtotrishulcapital@gmail.com?subject=Hi%20Trishul%20Capital&body=Hello%20Trishul%20Capital%2C%0A%0AI%20am%20interested%20to%20know%20more%20about%20your%20Forex%20Account%20Management%20Services.' },
+     { label: 'Email', icon: emailIcon, url: 'https://mail.google.com/mail/u/0/?fs=1&to=mailtotrishulcapital@gmail.com&su=Hi+Trishul+Capital&body=Hello+Trishul+Capital,%0A%0AI+am+interested+to+know+more+about+your+Forex+Account+Management+Services.&tf=cm' },
      { label: 'WhatsApp', icon: whatsappIcon, url: 'https://wa.me/919787801006?text=Hi%20...%20I%27m%20interested%20to%20know%20more%20about%20your%20Forex%20Account%20Management%20Services...' },
      { label: 'Instagram', icon: instagramIcon, url: 'https://www.instagram.com/trishulcapital' },
      { label: 'Telegram', icon: telegramIcon, url: 'https://t.me/Trishul_Capital' }
