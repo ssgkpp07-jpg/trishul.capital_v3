@@ -20,6 +20,11 @@ const json = (statusCode, body) => {
 };
 
 const bodyOf = (req) => req.body || {};
+const DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES = {
+  onboarded: 'Hello {{client_name}},\n\nWelcome to Trishul Capital. Your account has been onboarded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds recorded: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital',
+  offboarded: 'Hello {{client_name}},\n\nYour account has been offboarded from our active portfolio records.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds withdrawn: {{amount}}\nDate: {{date}}\n\nThank you for being with Trishul Capital.\n\n— Trishul Capital',
+  profit_withdrawn: 'Hello {{client_name}},\n\nYour profit withdrawal has been recorded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nProfit withdrawn: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital'
+};
 
 const authorized = (req) => {
   try {
@@ -106,6 +111,38 @@ export default async function handler(req, res) {
 
     if (method === 'GET' && path === '/api/admin/portfolio') {
       return res.status(200).json(await getPortfolio());
+    }
+
+    if (method === 'GET' && path === '/api/admin/message-templates') {
+      const { data, error } = await supabase.from('settings').select('value').eq('key', 'portfolio_message_templates').maybeSingle();
+      if (error) throw error;
+      if (!data?.value) return res.status(200).json({ templates: DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES });
+      let templates;
+      try {
+        templates = JSON.parse(data.value);
+      } catch {
+        throw new Error('Saved portfolio message templates are not valid JSON. Re-save the templates from the admin page.');
+      }
+      const validTemplates = Object.fromEntries(Object.keys(DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES).map(key => [key, typeof templates?.[key] === 'string' ? templates[key] : DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES[key]]));
+      return res.status(200).json({ templates: validTemplates });
+    }
+
+    if (method === 'PUT' && path === '/api/admin/message-templates') {
+      const templates = bodyOf(req).templates;
+      if (!templates || typeof templates !== 'object' || Array.isArray(templates)) {
+        return res.status(400).json({ message: 'Provide onboarded, offboarded, and profit_withdrawn message templates.' });
+      }
+      for (const key of Object.keys(DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES)) {
+        if (typeof templates[key] !== 'string' || !templates[key].trim()) {
+          return res.status(400).json({ message: `The ${key.replace(/_/g, ' ')} message cannot be empty.` });
+        }
+        if (templates[key].length > 5000) {
+          return res.status(400).json({ message: `The ${key.replace(/_/g, ' ')} message must be 5,000 characters or fewer.` });
+        }
+      }
+      const { error } = await supabase.from('settings').upsert({ key: 'portfolio_message_templates', value: JSON.stringify(templates) });
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
     }
 
     if (method === 'GET' && path === '/api/admin/portfolio/clients') {
