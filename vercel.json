@@ -2,6 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/admin/:path*", "destination": "/api/index?route=/api/admin/:path*" },
     { "source": "/admin/login", "destination": "/admin/login/index.html" },
     { "source": "/portfolio", "destination": "/index.html" }
   ],
