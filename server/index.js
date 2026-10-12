@@ -36,6 +36,11 @@ const auth=(req,res,next)=>{try{req.user=jwt.verify((req.headers.authorization||
 const getPortfolio=()=>summarizePortfolio(db.prepare('SELECT * FROM portfolio_events ORDER BY created_at DESC,id DESC').all());
 const getPortfolioClients=()=>db.prepare('SELECT * FROM portfolio_clients ORDER BY created_at DESC,client_id').all();
 const portfolioClientName=client=>`${client.first_name} ${client.second_name}`.trim();
+const defaultPortfolioMessageTemplates={
+ onboarded:'Hello {{client_name}},\n\nWelcome to Trishul Capital. Your account has been onboarded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds recorded: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital',
+ offboarded:'Hello {{client_name}},\n\nYour account has been offboarded from our active portfolio records.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds withdrawn: {{amount}}\nDate: {{date}}\n\nThank you for being with Trishul Capital.\n\n— Trishul Capital',
+ profit_withdrawn:'Hello {{client_name}},\n\nYour profit withdrawal has been recorded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nProfit withdrawn: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital'
+};
 app.use('/api',(req,res,next)=>{res.set('Cache-Control','no-store, max-age=0');next()});app.get('/api/health',(req,res)=>res.json({ok:true,service:'trishul-capital-api'}));
 app.post('/api/admin/login',(req,res)=>{const username=String(req.body?.username||'').trim().toLowerCase(),password=String(req.body?.password||'');if(username!==ADMIN_USER||password!==ADMIN_PASS)return res.status(401).json({message:'Invalid credentials'});res.json({token:jwt.sign({sub:ADMIN_USER},SECRET,{expiresIn:'12h'})})});
 
@@ -82,7 +87,43 @@ app.put('/api/admin/performance-details',auth,(req,res)=>{
  res.json({ok:true,accounts:updated});
 });
 app.get('/api/admin/portfolio',auth,(req,res)=>res.json(getPortfolio()));
+app.get('/api/admin/message-templates',auth,(req,res)=>{
+ const row=db.prepare('SELECT value FROM settings WHERE key=?').get('portfolio_message_templates');
+ if(!row?.value)return res.json({templates:defaultPortfolioMessageTemplates});
+ try{
+  const templates=JSON.parse(row.value);
+  return res.json({templates:Object.fromEntries(Object.keys(defaultPortfolioMessageTemplates).map(key=>[key,typeof templates?.[key]==='string'?templates[key]:defaultPortfolioMessageTemplates[key]]))});
+ }catch{
+  return res.status(500).json({message:'Saved portfolio message templates are not valid JSON. Re-save them from the admin page.'});
+ }
+});
+app.put('/api/admin/message-templates',auth,(req,res)=>{
+ const templates=req.body?.templates;
+ if(!templates||typeof templates!=='object'||Array.isArray(templates))return res.status(400).json({message:'Provide onboarded, offboarded, and profit_withdrawn message templates.'});
+ for(const key of Object.keys(defaultPortfolioMessageTemplates)){
+  if(typeof templates[key]!=='string'||!templates[key].trim())return res.status(400).json({message:`The ${key.replace(/_/g,' ')} message cannot be empty.`});
+  if(templates[key].length>5000)return res.status(400).json({message:`The ${key.replace(/_/g,' ')} message must be 5,000 characters or fewer.`});
+ }
+ db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('portfolio_message_templates',JSON.stringify(templates));
+ return res.json({ok:true});
+});
 app.get('/api/admin/portfolio/clients',auth,(req,res)=>res.json({clients:getPortfolioClients()}));
+app.put('/api/admin/portfolio/clients/:clientId',auth,(req,res)=>{
+ const clientId=String(req.params.clientId||'').trim().toUpperCase(),input=req.body||{},client={
+  first_name:String(input.first_name||'').trim(),second_name:String(input.second_name||'').trim(),
+  email:String(input.email||'').trim().toLowerCase(),whatsapp_number:String(input.whatsapp_number||'').trim(),
+  national_id:String(input.national_id||'').trim(),address_line1:String(input.address_line1||'').trim(),
+  address_line2:String(input.address_line2||'').trim(),city:String(input.city||'').trim(),
+  state:String(input.state||'').trim(),country:String(input.country||'').trim(),pincode:String(input.pincode||'').trim()
+ };
+ if(!clientId)return res.status(400).json({message:'Client ID is required'});
+ if(Object.entries(client).some(([field,value])=>!['address_line2','email','whatsapp_number'].includes(field)&&!value))return res.status(400).json({message:'Complete all required client information fields'});
+ if(client.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email))return res.status(400).json({message:'Enter a valid client email address or leave it blank'});
+ if(client.whatsapp_number&&!/^\+[1-9]\d{7,14}$/.test(client.whatsapp_number))return res.status(400).json({message:'Enter the WhatsApp number in international format, e.g. +14155552671, or leave it blank'});
+ const result=db.prepare('UPDATE portfolio_clients SET first_name=?,second_name=?,email=?,whatsapp_number=?,national_id=?,address_line1=?,address_line2=?,city=?,state=?,country=?,pincode=? WHERE client_id=?').run(client.first_name,client.second_name,client.email,client.whatsapp_number,client.national_id,client.address_line1,client.address_line2,client.city,client.state,client.country,client.pincode,clientId);
+ if(!result.changes)return res.status(404).json({message:'Registered client not found'});
+ res.json({client:db.prepare('SELECT * FROM portfolio_clients WHERE client_id=?').get(clientId)});
+});
 app.post('/api/admin/portfolio/clients',auth,(req,res)=>{
  const input=req.body||{},client={
   client_id:String(input.client_id||'').trim().toUpperCase(),
@@ -159,4 +200,4 @@ app.delete('/api/admin/portfolio/:accountNumber',auth,(req,res)=>{
  res.json(getPortfolio());
 });
 app.get('/api/admin/accounts',auth,(req,res)=>res.json({accounts:db.prepare('SELECT * FROM accounts ORDER BY id DESC').all()}));app.post('/api/admin/accounts',auth,(req,res)=>{let {kind='client',name,package_name='',myfxbook_url}=req.body;if(!name||!myfxbook_url)return res.status(400).json({message:'Name and Myfxbook URL are required'});let r=db.prepare('INSERT INTO accounts(kind,name,package_name,myfxbook_url) VALUES(?,?,?,?)').run(kind,name,package_name,myfxbook_url);res.json({ok:true,id:r.lastInsertRowid})});app.delete('/api/admin/accounts/:id',auth,(req,res)=>{db.prepare('UPDATE accounts SET active=0 WHERE id=?').run(req.params.id);res.json({ok:true})});app.get('/api/admin/socials',auth,(req,res)=>res.json({items:db.prepare('SELECT * FROM socials ORDER BY id').all()}));app.post('/api/admin/socials',auth,(req,res)=>{db.prepare('INSERT INTO socials(platform,url) VALUES(?,?)').run(req.body.platform,req.body.url);res.json({ok:true})});app.put('/api/admin/settings',auth,(req,res)=>{db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(req.body.key,req.body.value);res.json({ok:true})});app.get('/api/admin/pages',auth,(req,res)=>res.json({pages:db.prepare('SELECT * FROM pages ORDER BY id DESC').all()}));app.post('/api/admin/pages',auth,(req,res)=>{db.prepare('INSERT INTO pages(slug,title,body) VALUES(?,?,?)').run(req.body.slug,req.body.title,req.body.body);res.json({ok:true})});
-app.get('/admin/login',(req,res)=>res.sendFile(path.join(process.cwd(),'public','admin','login','index.html')));app.get('*',(req,res)=>res.sendFile(process.cwd()+'/dist/index.html'));app.listen(process.env.PORT||8787,()=>console.log('Trishul Capital running'));
+app.get('/admin/login',(req,res)=>res.sendFile(path.join(process.cwd(),'public','admin','login','index.html')));app.get('/admin/message-templates.html',(req,res)=>res.sendFile(path.join(process.cwd(),'public','admin','message-templates.html')));app.get('*',(req,res)=>res.sendFile(process.cwd()+'/dist/index.html'));app.listen(process.env.PORT||8787,()=>console.log('Trishul Capital running'));
