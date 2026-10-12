@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
 
 let supabaseClient;
@@ -12,8 +13,6 @@ const getSupabase = () => {
   return supabaseClient;
 };
 const supabase = { from: (...args) => getSupabase().from(...args) };
-const adminUser = (process.env.ADMIN_USERNAME || 'admin@trishulcapital.com').trim().toLowerCase();
-const adminPassword = process.env.ADMIN_PASSWORD || 'TC-ChangeThisPassword';
 const secret = process.env.JWT_SECRET || 'change-this-secret';
 
 const json = (statusCode, body) => {
@@ -88,12 +87,7 @@ export default async function handler(req, res) {
     }
 
     if (method === 'POST' && path === '/api/admin/login') {
-      const input = bodyOf(req);
-      const username = String(input.username || '').trim().toLowerCase();
-      if (username !== adminUser || String(input.password || '') !== adminPassword) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-      return res.status(200).json({ token: jwt.sign({ sub: adminUser }, secret, { expiresIn: '12h' }) });
+      return loginHandler(req, res);
     }
 
     if (method === 'GET' && path === '/api/performance-details') {
