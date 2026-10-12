@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Message Templates | Trishul Capital Admin</title>
+  <style>
+    :root{--bg:#050505;--panel:#0d0d0d;--gold:#d6ad43;--gold2:#f4d47b;--line:#292929;--muted:#999}
+    *{box-sizing:border-box}
+    body{margin:0;padding:28px;background:var(--bg);color:#f4f0e6;font:14px Arial,sans-serif}
+    main{max-width:900px;margin:auto;padding:28px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+    header,.actions{display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .eyebrow{color:var(--gold);font-size:11px;letter-spacing:1.4px;text-transform:uppercase}
+    h1,h2{font-family:Georgia,serif}
+    h1{margin:8px 0;color:var(--gold2);font-size:30px}
+    h2{margin:0;color:var(--gold2);font-size:21px}
+    p{line-height:1.55}
+    .muted{color:var(--muted)}
+    .template{margin:20px 0;padding:18px;border:1px solid #38342a;border-radius:8px;background:#101010}
+    .template label{display:block;margin:12px 0 6px;color:#ddd;font-weight:bold}
+    textarea{display:block;width:100%;min-height:190px;padding:12px;resize:vertical;background:#080808;color:#f4f0e6;border:1px solid #49443a;border-radius:6px;font:14px/1.55 Arial,sans-serif}
+    button,.link{display:inline-block;width:auto;margin:0;padding:11px 15px;border:1px solid #554821;border-radius:5px;background:#151208;color:var(--gold2);font-weight:bold;text-decoration:none;cursor:pointer}
+    button.primary{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#111;border:0}
+    .actions{justify-content:flex-end;margin-top:18px}
+    .status{margin-top:14px;padding:12px;border:1px solid #3d341c;border-radius:6px;background:#151208;color:#e9d89d}
+    .status.error{border-color:#63332f;background:#190d0c;color:#ffb6ad}
+    code{color:var(--gold2)}
+    @media(max-width:620px){body{padding:12px}main{padding:18px}header{align-items:flex-start;flex-direction:column}.actions{align-items:stretch;flex-direction:column-reverse}.actions button,.actions .link{width:100%;text-align:center}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">Private admin · Message settings</div>
+        <h1>Default client messages</h1>
+        <p class="muted">Customize the message body used in the editable email and WhatsApp previews for portfolio updates. Changes are saved centrally for this admin system.</p>
+      </div>
+      <a class="link" href="/admin/login">← Back to Admin</a>
+    </header>
+    <div class="status" id="loadStatus" role="status">Loading saved templates…</div>
+    <p class="muted">Available placeholders: <code>{{client_name}}</code>, <code>{{client_id}}</code>, <code>{{account_number}}</code>, <code>{{amount}}</code>, <code>{{date}}</code>, and <code>{{transaction}}</code>. Any placeholder you do not need can be removed.</p>
+    <form id="templateForm">
+      <section class="template">
+        <h2>Onboarding / funds added</h2>
+        <label for="onboardedTemplate">Default message</label>
+        <textarea id="onboardedTemplate" maxlength="5000" required></textarea>
+      </section>
+      <section class="template">
+        <h2>Offboarding</h2>
+        <label for="offboardedTemplate">Default message</label>
+        <textarea id="offboardedTemplate" maxlength="5000" required></textarea>
+      </section>
+      <section class="template">
+        <h2>Profit withdrawal</h2>
+        <label for="profitWithdrawnTemplate">Default message</label>
+        <textarea id="profitWithdrawnTemplate" maxlength="5000" required></textarea>
+      </section>
+      <div class="actions">
+        <button type="button" id="restoreDefaults">Restore starter messages</button>
+        <button type="submit" class="primary" id="saveTemplates">Save message templates</button>
+      </div>
+    </form>
+    <div class="status" id="saveStatus" role="status" hidden></div>
+  </main>
+  <script src="/config.js"></script>
+  <script>
+    const API_BASE = (window.TRISHUL_API_URL || '').replace(/\/$/, '');
+    const token = sessionStorage.getItem('trishul_admin_token');
+    const defaults = {
+      onboarded: 'Hello {{client_name}},\n\nWelcome to Trishul Capital. Your account has been onboarded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds recorded: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital',
+      offboarded: 'Hello {{client_name}},\n\nYour account has been offboarded from our active portfolio records.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds withdrawn: {{amount}}\nDate: {{date}}\n\nThank you for being with Trishul Capital.\n\n— Trishul Capital',
+      profit_withdrawn: 'Hello {{client_name}},\n\nYour profit withdrawal has been recorded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nProfit withdrawn: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital'
+    };
+    const fields = {onboarded:'onboardedTemplate',offboarded:'offboardedTemplate',profit_withdrawn:'profitWithdrawnTemplate'};
+    const $ = id => document.getElementById(id);
+    const loadStatus = $('loadStatus');
+    const saveStatus = $('saveStatus');
+    async function request(path, options = {}) {
+      const response = await fetch(API_BASE + path, {
+        ...options,
+        headers: {'Content-Type':'application/json',Authorization:`Bearer ${token}`,...options.headers}
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(data.message || `Request failed (${response.status})`);
+      return data;
+    }
+    function setTemplates(templates) {
+      for (const [key,id] of Object.entries(fields)) $(id).value = templates[key] || defaults[key];
+    }
+    async function loadTemplates() {
+      if (!token) throw Error('Your admin session is missing or expired. Sign in again, then open Message Templates from the admin menu.');
+      const response = await request('/api/admin/message-templates');
+      setTemplates(response.templates || defaults);
+      loadStatus.hidden = true;
+    }
+    $('restoreDefaults').addEventListener('click', () => {
+      setTemplates(defaults);
+      saveStatus.textContent = 'Starter messages restored in the editor. Save to make them the active templates.';
+      saveStatus.classList.remove('error');
+      saveStatus.hidden = false;
+    });
+    $('templateForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = $('saveTemplates');
+      button.disabled = true;
+      saveStatus.hidden = true;
+      try {
+        const templates = Object.fromEntries(Object.entries(fields).map(([key,id]) => [key,$(id).value]));
+        await request('/api/admin/message-templates', {method:'PUT',body:JSON.stringify({templates})});
+        saveStatus.textContent = 'Message templates saved. They will be used in future onboarding, offboarding, and profit withdrawal previews.';
+        saveStatus.classList.remove('error');
+        saveStatus.hidden = false;
+      } catch (error) {
+        saveStatus.textContent = error.message;
+        saveStatus.classList.add('error');
+        saveStatus.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    loadTemplates().catch(error => {
+      loadStatus.textContent = error.message;
+      loadStatus.classList.add('error');
+    });
+  </script>
+</body>
+</html>
