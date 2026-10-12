@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Client Transaction History | Trishul Capital</title>
+  <style>
+    :root{--bg:#050505;--panel:#0d0d0d;--gold:#d6ad43;--gold2:#f4d47b;--muted:#999;--line:#292929}
+    *{box-sizing:border-box}
+    body{margin:0;padding:30px;background:var(--bg);color:#f4f0e6;font:14px Arial,sans-serif}
+    main{max-width:1100px;margin:auto;padding:30px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+    .top,.toolbar,.history-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}
+    .eyebrow{color:var(--gold);font-size:11px;letter-spacing:1.5px;text-transform:uppercase}
+    h1{margin:8px 0;color:var(--gold2);font:32px Georgia,serif}
+    h2{margin:0;font:22px Georgia,serif}
+    .muted,.subtle{color:var(--muted)}
+    .subtle{margin:0}
+    .rule{margin:24px 0;border:0;border-top:1px solid var(--line)}
+    .actions{display:flex;gap:8px}
+    button,.button-link{display:inline-block;width:auto;margin:0;padding:10px 14px;border:1px solid #574821;border-radius:5px;background:#111;color:var(--gold2);font-weight:bold;text-decoration:none;cursor:pointer}
+    button:hover,.button-link:hover{background:#19160e}
+    .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:28px}
+    .stat{padding:17px;border:1px solid #343126;border-radius:7px;background:#111}
+    .stat span{display:block;color:#aaa;font-size:12px}
+    .stat strong{display:block;margin-top:9px;color:var(--gold2);font-size:21px}
+    .history-heading{margin-bottom:14px}
+    .tag{padding:7px 10px;border:1px solid #544520;border-radius:20px;color:var(--gold2);font-size:11px}
+    .toolbar{margin-bottom:10px;color:var(--muted)}
+    input,select{padding:10px;background:#111;color:#eee;border:1px solid #444;border-radius:5px}
+    .table-wrap{overflow-x:auto;border:1px solid #333;border-radius:6px}
+    table{width:100%;border-collapse:collapse;min-width:650px}
+    th,td{padding:13px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{background:#13120e;color:var(--gold2)}
+    tbody tr:hover{background:#141414}
+    .credit{color:#7fd49a}
+    .debit{color:#f09c8b}
+    .notice{margin:12px 0;padding:12px;border:1px solid #63332f;border-radius:6px;background:#190d0c;color:#ffb6ad}
+    .empty{text-align:center;color:#aaa}
+    .account-section{margin:14px 0;border:1px solid #343126;border-radius:7px;overflow:hidden;break-inside:avoid}
+    .account-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;background:#14120e;border-bottom:1px solid #393327}
+    .account-heading h3{margin:0;color:var(--gold2)}
+    .account-balance{color:#aaa}
+    .share-note{margin-top:16px;padding:12px;border-left:3px solid var(--gold);background:#151208;color:#d4c9a8;line-height:1.5}
+    @media(max-width:650px){body{padding:12px}main{padding:18px}.top,.toolbar,.history-heading{align-items:stretch;flex-direction:column}.actions{width:100%}.actions>*{flex:1;text-align:center}h1{font-size:26px}.summary{grid-template-columns:1fr 1fr}.account-heading{align-items:flex-start;flex-direction:column}}
+    @media print{
+      @page{margin:16mm}
+      body{padding:0;background:#fff;color:#111;font-size:11pt}
+      main{max-width:none;padding:0;border:0;background:#fff}
+      .actions,.toolbar,.share-note,.notice,.tag{display:none!important}
+      h1,.stat strong,th{color:#111!important}
+      .eyebrow,.muted,.subtle,.stat span{color:#444!important}
+      .summary{break-inside:avoid}
+      .stat,.table-wrap{border-color:#aaa;background:#fff}
+      th,td{border-color:#bbb}
+      tbody tr:hover{background:transparent}
+      .credit,.debit{color:#111}
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <div>
+        <div class="eyebrow">Portfolio ledger · Client history</div>
+        <h1 id="clientName">Client transaction history</h1>
+        <p id="clientId" class="subtle"></p>
+      </div>
+      <div class="actions">
+        <a class="button-link" href="/admin/login">← Back to Portfolio Ledger</a>
+        <button type="button" onclick="window.print()">Print / Save PDF</button>
+        <button type="button" onclick="prepareWhatsApp()">Prepare WhatsApp</button>
+        <button type="button" onclick="prepareEmail()">Prepare email</button>
+      </div>
+    </header>
+    <hr class="rule">
+    <section class="summary" aria-label="Client transaction summary">
+      <div class="stat"><span>Total funds onboarded</span><strong id="fundsOnboarded">—</strong></div>
+      <div class="stat"><span>Profits withdrawn</span><strong id="profitsWithdrawn">—</strong></div>
+      <div class="stat"><span>Active accounts</span><strong id="activeAccountCount">—</strong></div>
+      <div class="stat"><span>Transactions</span><strong id="transactionCount">—</strong></div>
+    </section>
+    <section>
+      <div class="history-heading">
+        <h2>Account-wise transactions</h2>
+        <label class="tag">Show accounts
+          <select id="accountFilter" aria-label="Filter by account"><option value="">All accounts</option></select>
+        </label>
+      </div>
+      <div class="toolbar">
+        <span class="tag" id="accountCount">Loading accounts…</span>
+        <span>Newest transactions first within each account</span>
+      </div>
+      <div id="accountHistories"><p class="empty">Loading transaction history…</p></div>
+      <div id="pageError" class="notice" role="alert" hidden></div>
+      <p class="share-note"><strong>Manual sharing:</strong> Use Print / Save PDF and save the report, then attach that PDF yourself in WhatsApp or email. Prepare WhatsApp and Prepare email open editable, prefilled drafts for you to review and send manually.</p>
+    </section>
+  </main>
+  <script src="/config.js"></script>
+  <script>
+    const API_BASE = (window.TRISHUL_API_URL || '').replace(/\/$/, '');
+    const token = sessionStorage.getItem('trishul_admin_token');
+    const clientId = new URLSearchParams(location.search).get('client_id') || '';
+    const $ = id => document.getElementById(id);
+    const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const money = value => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD', maximumFractionDigits:2}).format(Number(value) || 0);
+    const labels = {onboarded:'Onboarded funds',funds_added:'Funds added',offboarded:'Funds withdrawn',profit_withdrawn:'Profits withdrawn'};
+    let clientEvents = [];
+    let clientRecord = null;
+    let clientName = '';
+    let accountSummaries = [];
+
+    async function getJson(path) {
+      const response = await fetch(API_BASE + path, {headers:{'Content-Type':'application/json',Authorization:'Bearer ' + token}});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(data.message || 'Request failed');
+      return data;
+    }
+
+    function summarizeAccounts(events) {
+      const grouped = new Map();
+      for (const event of events.filter(item => !item.deleted_at)) {
+        const number = String(event.account_number || 'Unknown account');
+        if (!grouped.has(number)) grouped.set(number, []);
+        grouped.get(number).push(event);
+      }
+      return [...grouped.entries()].map(([number, events]) => {
+        const ordered = [...events].sort((a,b) => new Date(b.created_at) - new Date(a.created_at) || Number(b.id)-Number(a.id));
+        const balance = events.reduce((total,event) => {
+          const amount = Number(event.amount) || 0;
+          if (event.event_type === 'onboarded' || event.event_type === 'funds_added') return total + amount;
+          if (event.event_type === 'offboarded') return total - amount;
+          return total;
+        },0);
+        return {number,events:ordered,balance:Math.max(0,balance)};
+      }).sort((a,b) => a.number.localeCompare(b.number,undefined,{numeric:true,sensitivity:'base'}));
+    }
+
+    function renderHistory() {
+      const selected = $('accountFilter').value;
+      const visibleAccounts = selected ? accountSummaries.filter(account => account.number === selected) : accountSummaries;
+      $('accountHistories').innerHTML = visibleAccounts.map(account => {
+        const rows = account.events.map(event => {
+          const debit = event.event_type === 'offboarded' || event.event_type === 'profit_withdrawn';
+          const label = labels[event.event_type] || event.event_type || 'Transaction';
+          const amount = Number(event.amount) || 0;
+          return `<tr><td>${escapeHTML(new Date(event.created_at).toLocaleString())}</td><td>${escapeHTML(label)}</td><td class="${debit ? 'debit' : 'credit'}">${debit ? '−' : '+'}${money(amount)}</td></tr>`;
+        }).join('');
+        return `<section class="account-section"><header class="account-heading"><h3>Account: ${escapeHTML(account.number)}</h3><span class="account-balance">${account.balance > 0 ? `Current funds: ${money(account.balance)}` : 'Offboarded / no active funds'}</span></header><div class="table-wrap"><table><thead><tr><th>Date &amp; time</th><th>Transaction</th><th>Funds (USD)</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+      }).join('') || '<p class="empty">No transactions found for this client.</p>';
+    }
+
+    function buildClientReport() {
+      const totalOnboarded = clientEvents.filter(event => !event.deleted_at && ['onboarded','funds_added'].includes(event.event_type)).reduce((sum,event) => sum + (Number(event.amount)||0),0);
+      const totalProfits = clientEvents.filter(event => !event.deleted_at && event.event_type === 'profit_withdrawn').reduce((sum,event) => sum + (Number(event.amount)||0),0);
+      const name = clientName || 'Client';
+      const lines = [
+        `Client transaction summary for ${name}`,
+        `Client ID: ${clientId}`,
+        `Accounts: ${accountSummaries.length}`,
+        `Total funds onboarded: ${money(totalOnboarded)}`,
+        `Profits withdrawn: ${money(totalProfits)}`,
+        `Transactions: ${clientEvents.filter(event => !event.deleted_at).length}`,
+        '',
+        ...accountSummaries.flatMap(account => [
+          `Account ${account.number} — current funds: ${money(account.balance)}`,
+          ...account.events.map(event => `${new Date(event.created_at).toLocaleString()} | ${labels[event.event_type] || event.event_type} | ${money(event.amount)}`),
+          ''
+        ]),
+        'For any questions, please contact Trishul Capital.'
+      ];
+      return lines.join('\n');
+    }
+
+    function prepareWhatsApp() {
+      const phone = String(clientRecord?.whatsapp_number || '').replace(/\D/g,'');
+      if (!phone) { $('pageError').textContent = 'This client has no WhatsApp number saved. Add it from Admin → Client Registration → Edit.'; $('pageError').hidden = false; return; }
+      const text = `Hello ${clientName},\n\n${buildClientReport()}\n\n— Trishul Capital`;
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,'_blank','noopener,noreferrer');
+    }
+
+    function prepareEmail() {
+      const email = String(clientRecord?.email || '').trim();
+      if (!email) { $('pageError').textContent = 'This client has no email saved. Add it from Admin → Client Registration → Edit.'; $('pageError').hidden = false; return; }
+      const subject = `Client transaction history — ${clientName} (${clientId})`;
+      window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildClientReport())}`,'_blank','noopener,noreferrer');
+    }
+
+    async function loadClientHistory() {
+      if (!clientId) throw Error('Client ID is missing from this page link.');
+      if (!token) throw Error('Your admin session has expired. Sign in again to view client history.');
+      const [portfolio, clientData] = await Promise.all([
+        getJson('/api/admin/portfolio'),
+        getJson('/api/admin/portfolio/clients')
+      ]);
+      const normalizedClientId = clientId.trim().toUpperCase();
+      const client = (clientData.clients || []).find(item => String(item.client_id).trim().toUpperCase() === normalizedClientId);
+      clientRecord = client || null;
+      clientEvents = (portfolio.events || []).filter(event => String(event.client_id || '').trim().toUpperCase() === normalizedClientId);
+      const activeEvents = clientEvents.filter(event => !event.deleted_at);
+      const fundsOnboarded = activeEvents.filter(event => event.event_type === 'onboarded' || event.event_type === 'funds_added').reduce((total, event) => total + (Number(event.amount) || 0), 0);
+      const profitsWithdrawn = activeEvents.filter(event => event.event_type === 'profit_withdrawn').reduce((total, event) => total + (Number(event.amount) || 0), 0);
+      accountSummaries = summarizeAccounts(clientEvents);
+      clientName = client ? `${client.first_name || ''} ${client.second_name || ''}`.trim() : clientEvents.find(event => event.client_name)?.client_name || 'Client';
+      $('clientName').textContent = clientName;
+      $('clientId').textContent = `Client ID: ${normalizedClientId}`;
+      $('fundsOnboarded').textContent = money(fundsOnboarded);
+      $('profitsWithdrawn').textContent = money(profitsWithdrawn);
+      $('transactionCount').textContent = activeEvents.length;
+      $('activeAccountCount').textContent = accountSummaries.filter(account => account.balance > 0).length;
+      $('accountCount').textContent = `${accountSummaries.length} trading ${accountSummaries.length === 1 ? 'account' : 'accounts'}`;
+      $('accountFilter').innerHTML = '<option value="">All accounts</option>' + accountSummaries.map(account => `<option value="${escapeHTML(account.number)}">${escapeHTML(account.number)}</option>`).join('');
+      renderHistory();
+    }
+
+    $('accountFilter').addEventListener('change', renderHistory);
+    loadClientHistory().catch(error => {
+      $('pageError').textContent = error.message;
+      $('pageError').hidden = false;
+      $('accountHistories').innerHTML = '<p class="empty">Unable to load client transactions.</p>';
+      $('accountCount').textContent = 'History unavailable';
+    });
+  </script>
+</body>
+</html>
