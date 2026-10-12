@@ -9,14 +9,6 @@
     "api/index.js": {
       "memory": 1024,
       "maxDuration": 60
-    },
-    "api/[...path].js": {
-      "memory": 1024,
-      "maxDuration": 60
-    },
-    "api/admin/[...path].js": {
-      "memory": 1024,
-      "maxDuration": 60
     }
   }
 }
