@@ -78,7 +78,10 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
 
-  const path = req.url.split('?')[0];
+  const requestedRoute = typeof req.query?.route === 'string' ? req.query.route : '';
+  const path = requestedRoute.startsWith('/api/admin/')
+    ? requestedRoute
+    : req.url.split('?')[0];
   const method = req.method;
 
   try {
