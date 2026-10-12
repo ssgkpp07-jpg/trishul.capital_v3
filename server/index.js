@@ -1,0 +1,157 @@
+import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';dotenv.config();
+const databasePath=process.env.DATABASE_PATH||'trishul.db',databaseDirectory=path.dirname(databasePath);if(databaseDirectory!=='.')fs.mkdirSync(databaseDirectory,{recursive:true});
+const app=express(),db=new Database(databasePath),allowedOrigins=(process.env.FRONTEND_URL||'').split(',').map(x=>x.trim().replace(/\/$/,'')).filter(Boolean);app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);cb(new Error('Origin not allowed by CORS'))}}));app.use(express.json({limit:'8mb'}));app.use(express.static('dist'));app.use('/assets',express.static('public'));fs.mkdirSync('public/uploads',{recursive:true});
+db.exec(`CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,name TEXT NOT NULL,package_name TEXT,myfxbook_url TEXT NOT NULL,active INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,last_sync TEXT);CREATE TABLE IF NOT EXISTS snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,captured_at TEXT DEFAULT CURRENT_TIMESTAMP,gain REAL,daily REAL,monthly REAL,yearly REAL,drawdown REAL,balance REAL,equity REAL,profit REAL,pips REAL,trades INTEGER,win_rate REAL,profit_factor REAL,FOREIGN KEY(account_id) REFERENCES accounts(id));CREATE TABLE IF NOT EXISTS socials(id INTEGER PRIMARY KEY AUTOINCREMENT,platform TEXT,url TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE IF NOT EXISTS pages(id INTEGER PRIMARY KEY AUTOINCREMENT,slug TEXT UNIQUE,title TEXT,body TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS portfolio_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL CHECK(event_type IN ('onboarded','offboarded','profit_withdrawn')),client_name TEXT NOT NULL,account_number TEXT NOT NULL,amount REAL NOT NULL CHECK(amount>0),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+db.exec(`CREATE TABLE IF NOT EXISTS portfolio_clients(client_id TEXT PRIMARY KEY,first_name TEXT NOT NULL,second_name TEXT NOT NULL,national_id TEXT NOT NULL,address_line1 TEXT NOT NULL,address_line2 TEXT NOT NULL DEFAULT '',city TEXT NOT NULL,state TEXT NOT NULL,country TEXT NOT NULL,pincode TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,deleted_at TEXT);`);
+const portfolioSchema=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_events'").get()?.sql||'';
+if(!portfolioSchema.includes("'funds_added'")){
+ const migratePortfolio=db.transaction(()=>{
+  db.exec('DROP INDEX IF EXISTS portfolio_events_account_created_idx');
+  db.exec('ALTER TABLE portfolio_events RENAME TO portfolio_events_legacy');
+  db.exec(`CREATE TABLE portfolio_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL CHECK(event_type IN ('onboarded','funds_added','offboarded','profit_withdrawn')),client_name TEXT NOT NULL,account_number TEXT NOT NULL,amount REAL NOT NULL CHECK(amount>0),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,deleted_at TEXT)`);
+  db.exec('INSERT INTO portfolio_events(id,event_type,client_name,account_number,amount,created_at) SELECT id,event_type,client_name,account_number,amount,created_at FROM portfolio_events_legacy');
+  db.exec('DROP TABLE portfolio_events_legacy');
+ });
+ migratePortfolio();
+}
+if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.name==='deleted_at'))db.exec('ALTER TABLE portfolio_events ADD COLUMN deleted_at TEXT');
+if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.name==='client_id'))db.exec('ALTER TABLE portfolio_events ADD COLUMN client_id TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS portfolio_events_account_created_idx ON portfolio_events(account_number,created_at DESC)');
+try{db.exec('ALTER TABLE accounts ADD COLUMN portfolio_image TEXT')}catch{}
+for(const [k,v] of [['contact_email','contact@trishulcapital.com'],['contact_whatsapp',''],['contact_telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run(k,v);if(!db.prepare('SELECT COUNT(*) c FROM socials').get().c)for(const x of [['Instagram',''],['WhatsApp',''],['Telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT INTO socials(platform,url) VALUES(?,?)').run(...x);
+const defaultPerformanceAccounts=[
+ {id:'gold',name:'Gold EA',status:'Online',broker:'GlobalPrime or FMGP Trading Group Pty Ltd',account_number:'5013649',investor_password:'*wgR7D21K6',server:'GlobalPrime-Trade',myfxbook_url:'https://www.myfxbook.com/portfolio/moon-ea/12175434'},
+ {id:'combo',name:'Combo EA',status:'Online',broker:'TickMill Ltd',account_number:'55924704',investor_password:'2+fH>0nD&mQ4',server:'TickMill - Live',myfxbook_url:'https://www.myfxbook.com/portfolio/tirplet-combo/12171732'}
+];
+db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run('performance_accounts',JSON.stringify(defaultPerformanceAccounts));
+const getPerformanceAccounts=()=>JSON.parse(db.prepare('SELECT value FROM settings WHERE key=?').get('performance_accounts').value);
+const setPerformanceAccounts=accounts=>db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('performance_accounts',JSON.stringify(accounts));
+const comboAccountUrl='https://www.myfxbook.com/members/JFT1177/tirplet-combo/12171732';if(!db.prepare("SELECT COUNT(*) c FROM accounts WHERE kind='performance'").get().c)db.prepare("INSERT INTO accounts(kind,name,package_name,myfxbook_url) VALUES(?,?,?,?)").run('performance','Combo EA','Combo EA',comboAccountUrl);db.prepare("UPDATE accounts SET name='Combo EA',package_name='Combo EA' WHERE kind='performance' AND name='Triplet Combo EA'").run();
+const ADMIN_USER=(process.env.ADMIN_USERNAME||'admin@trishulcapital.com').trim().toLowerCase(),ADMIN_PASS=process.env.ADMIN_PASSWORD||'TC-ChangeThisPassword',SECRET=process.env.JWT_SECRET||'change-this-secret';
+if(process.env.NODE_ENV==='production'&&SECRET==='change-this-secret')throw new Error('JWT_SECRET must be set in production');
+if(process.env.NODE_ENV==='production'&&ADMIN_PASS==='TC-ChangeThisPassword')console.warn('WARNING: Replace the temporary ADMIN_PASSWORD before production use.');
+const auth=(req,res,next)=>{try{req.user=jwt.verify((req.headers.authorization||'').replace('Bearer ',''),SECRET);next()}catch{res.status(401).json({message:'Unauthorized'})}};
+const getPortfolio=()=>summarizePortfolio(db.prepare('SELECT * FROM portfolio_events ORDER BY created_at DESC,id DESC').all());
+const getPortfolioClients=()=>db.prepare('SELECT * FROM portfolio_clients ORDER BY created_at DESC,client_id').all();
+const portfolioClientName=client=>`${client.first_name} ${client.second_name}`.trim();
+app.use('/api',(req,res,next)=>{res.set('Cache-Control','no-store, max-age=0');next()});app.get('/api/health',(req,res)=>res.json({ok:true,service:'trishul-capital-api'}));
+app.post('/api/admin/login',(req,res)=>{const username=String(req.body?.username||'').trim().toLowerCase(),password=String(req.body?.password||'');if(username!==ADMIN_USER||password!==ADMIN_PASS)return res.status(401).json({message:'Invalid credentials'});res.json({token:jwt.sign({sub:ADMIN_USER},SECRET,{expiresIn:'12h'})})});
+
+app.get('/api/portfolio',(req,res)=>{const portfolio=getPortfolio();res.json({summary:portfolio.summary,monthly:summarizePortfolioMonths(portfolio.events)})});
+app.get('/api/performance-details',(req,res)=>res.json({accounts:getPerformanceAccounts()}));
+app.get('/api/settings/contact',(req,res)=>res.json({email:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_email')?.value,whatsapp:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_whatsapp')?.value,telegram:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_telegram')?.value}));app.get('/api/settings/socials',(req,res)=>res.json({items:db.prepare('SELECT * FROM socials WHERE active=1 ORDER BY id').all()}));
+app.get('/api/admin/performance-details',auth,(req,res)=>res.json({accounts:getPerformanceAccounts()}));
+app.put('/api/admin/performance-details',auth,(req,res)=>{
+ const {accounts}=req.body||{};
+ const current=getPerformanceAccounts();
+ if(!Array.isArray(accounts))return res.status(400).json({message:'Performance accounts must be a list'});
+ const updated=[];
+ const ids=new Set();
+ for(const account of accounts){
+    const existing=current.find(item=>item.id===account?.id);
+    if(typeof account?.id!=='string'||!account.id.trim()||ids.has(account.id))return res.status(400).json({message:'Each performance account must have a unique ID'});
+    ids.add(account.id);
+    const next={...(existing||{}),id:account.id};
+    if(typeof account.name!=='string'||!account.name.trim())return res.status(400).json({message:'EA display name is required'});
+    next.name=account.name.trim();
+  for(const field of ['broker','account_number','investor_password','server','myfxbook_url']){
+   if(typeof account[field]!=='string'||!account[field].trim())return res.status(400).json({message:`${existing.name}: ${field.replace(/_/g,' ')} is required`});
+   next[field]=account[field].trim();
+  }
+  let url;
+  try{url=new URL(next.myfxbook_url)}catch{return res.status(400).json({message:`${existing.name}: enter a valid Myfxbook URL`})}
+  if(url.protocol!=='https:'||url.hostname!=='www.myfxbook.com')return res.status(400).json({message:`${existing.name}: Myfxbook URL must use https://www.myfxbook.com`});
+  updated.push(next);
+ }
+ if(new Set(updated.map(account=>account.name.toLowerCase())).size!==updated.length)return res.status(400).json({message:'EA display names must be unique'});
+ const saveDetails=db.transaction(()=>{
+  setPerformanceAccounts(updated);
+    const updatedIds=new Set(updated.map(account=>account.id));
+    for(const previous of current){
+     if(!updatedIds.has(previous.id))db.prepare('UPDATE accounts SET active=0 WHERE kind=? AND (name=? OR myfxbook_url=?)').run('performance',previous.name,previous.myfxbook_url);
+    }
+    for(const account of updated){
+     const previous=current.find(item=>item.id===account.id);
+     const result=previous&&db.prepare('UPDATE accounts SET name=?,package_name=?,myfxbook_url=?,active=1 WHERE kind=? AND (name=? OR myfxbook_url=?)').run(account.name,account.name,account.myfxbook_url,'performance',previous.name,previous.myfxbook_url);
+     if(!result?.changes)db.prepare('INSERT INTO accounts(kind,name,package_name,myfxbook_url) VALUES(?,?,?,?)').run('performance',account.name,account.name,account.myfxbook_url);
+  }
+ });
+ saveDetails();
+ res.json({ok:true,accounts:updated});
+});
+app.get('/api/admin/portfolio',auth,(req,res)=>res.json(getPortfolio()));
+app.get('/api/admin/portfolio/clients',auth,(req,res)=>res.json({clients:getPortfolioClients()}));
+app.post('/api/admin/portfolio/clients',auth,(req,res)=>{
+ const input=req.body||{},client={
+  client_id:String(input.client_id||'').trim().toUpperCase(),
+  first_name:String(input.first_name||'').trim(),second_name:String(input.second_name||'').trim(),
+  national_id:String(input.national_id||'').trim(),address_line1:String(input.address_line1||'').trim(),address_line2:String(input.address_line2||'').trim(),
+  city:String(input.city||'').trim(),state:String(input.state||'').trim(),country:String(input.country||'').trim(),pincode:String(input.pincode||'').trim()
+ };
+ if(Object.entries(client).some(([field,value])=>field!=='address_line2'&&!value))return res.status(400).json({message:'Complete all required client registration fields'});
+ try{db.prepare('INSERT INTO portfolio_clients(client_id,first_name,second_name,national_id,address_line1,address_line2,city,state,country,pincode) VALUES(?,?,?,?,?,?,?,?,?,?)').run(client.client_id,client.first_name,client.second_name,client.national_id,client.address_line1,client.address_line2,client.city,client.state,client.country,client.pincode)}catch(error){if(error.code==='SQLITE_CONSTRAINT_PRIMARYKEY'||error.code==='SQLITE_CONSTRAINT_UNIQUE')return res.status(409).json({message:'That Client ID is already registered'});throw error}
+ res.status(201).json({clients:getPortfolioClients()});
+});
+app.delete('/api/admin/portfolio/clients/:clientId/permanent',auth,(req,res)=>{
+ const clientId=String(req.params.clientId||'').trim().toUpperCase();
+ const client=db.prepare('SELECT deleted_at FROM portfolio_clients WHERE client_id=?').get(clientId);
+ if(!client)return res.status(404).json({message:'Registered client not found'});
+ if(!client.deleted_at)return res.status(409).json({message:'Remove the client first before permanent deletion'});
+ const removeClient=db.transaction(()=>{db.prepare('DELETE FROM portfolio_events WHERE client_id=?').run(clientId);return db.prepare('DELETE FROM portfolio_clients WHERE client_id=?').run(clientId).changes});
+ if(!removeClient())return res.status(404).json({message:'Registered client not found'});
+ res.json({clients:getPortfolioClients(),portfolio:getPortfolio()});
+});
+app.delete('/api/admin/portfolio/clients/:clientId',auth,(req,res)=>{
+ const clientId=String(req.params.clientId||'').trim().toUpperCase(),result=db.prepare('UPDATE portfolio_clients SET deleted_at=? WHERE client_id=? AND deleted_at IS NULL').run(new Date().toISOString(),clientId);
+ if(!result.changes)return res.status(404).json({message:'Active registered client not found'});
+ res.json({clients:getPortfolioClients()});
+});
+app.get('/api/admin/portfolio/export',auth,async(req,res)=>{
+ let events;
+ try{events=filterPortfolioEventsByDate(db.prepare('SELECT * FROM portfolio_events ORDER BY created_at,id').all(),req.query.from||'',req.query.to||'')}catch(error){return res.status(400).json({message:error.message})}
+ const workbook=await buildPortfolioWorkbook(events);
+ res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+ res.set('Content-Disposition','attachment; filename="portfolio-ledger.xlsx"');
+ res.send(Buffer.from(workbook));
+});
+app.delete('/api/admin/portfolio/event/:id/permanent',auth,(req,res)=>{
+ const eventId=Number(req.params.id);
+ if(!Number.isInteger(eventId)||eventId<=0)return res.status(400).json({message:'Invalid portfolio event ID'});
+ const event=db.prepare('SELECT deleted_at FROM portfolio_events WHERE id=?').get(eventId);
+ if(!event)return res.status(404).json({message:'Portfolio entry not found'});
+ if(!event.deleted_at)return res.status(409).json({message:'Delete the entry first before permanent deletion'});
+ const result=db.prepare('DELETE FROM portfolio_events WHERE id=?').run(eventId);
+ if(!result.changes)return res.status(404).json({message:'Portfolio entry not found'});
+ res.json(getPortfolio());
+});
+app.delete('/api/admin/portfolio/event/:id',auth,(req,res)=>{
+ const eventId=Number(req.params.id);
+ if(!Number.isInteger(eventId)||eventId<=0)return res.status(400).json({message:'Invalid portfolio event ID'});
+ const result=db.prepare('UPDATE portfolio_events SET deleted_at=? WHERE id=? AND deleted_at IS NULL').run(new Date().toISOString(),eventId);
+ if(!result.changes)return res.status(404).json({message:'Active portfolio entry not found'});
+ res.json(getPortfolio());
+});
+app.post('/api/admin/portfolio',auth,(req,res)=>{
+ const type=req.body?.type,clientId=String(req.body?.client_id||'').trim().toUpperCase(),accountNumber=String(req.body?.account_number||'').trim(),amount=Number(req.body?.amount);
+ const createdAt=req.body?.created_at?new Date(req.body.created_at):new Date();
+ if(!['onboarded','profit_withdrawn'].includes(type))return res.status(400).json({message:'Choose onboarding or profit withdrawal'});
+ if(!clientId||!accountNumber)return res.status(400).json({message:'Client ID and account number are required'});
+ if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({message:'Enter an amount greater than zero'});
+ if(Number.isNaN(createdAt.getTime()))return res.status(400).json({message:'Enter a valid date and time'});
+ const client=db.prepare('SELECT * FROM portfolio_clients WHERE client_id=? AND deleted_at IS NULL').get(clientId);
+ if(!client)return res.status(404).json({message:'Register this client before adding a portfolio entry'});
+ const portfolio=getPortfolio(),active=portfolio.active_accounts.find(account=>account.account_number===accountNumber);
+ if(active&&active.client_id!==clientId)return res.status(409).json({message:'This account number belongs to a different Client ID'});
+ if(type==='profit_withdrawn'&&(!active||active.client_id!==clientId))return res.status(400).json({message:'Profit withdrawals require an active account for this Client ID'});
+ const eventType=type==='onboarded'&&active?'funds_added':type;
+ db.prepare('INSERT INTO portfolio_events(event_type,client_id,client_name,account_number,amount,created_at) VALUES(?,?,?,?,?,?)').run(eventType,clientId,portfolioClientName(client),accountNumber,amount,createdAt.toISOString());
+ res.status(201).json(getPortfolio());
+});
+app.delete('/api/admin/portfolio/:accountNumber',auth,(req,res)=>{
+ const accountNumber=String(req.params.accountNumber||'').trim(),active=getPortfolio().active_accounts.find(account=>account.account_number===accountNumber);
+ if(!active)return res.status(404).json({message:'Active portfolio account not found'});
+ db.prepare("INSERT INTO portfolio_events(event_type,client_id,client_name,account_number,amount) VALUES('offboarded',?,?,?,?)").run(active.client_id,active.client_name,active.account_number,active.funds_managed);
+ res.json(getPortfolio());
+});
+app.get('/api/admin/accounts',auth,(req,res)=>res.json({accounts:db.prepare('SELECT * FROM accounts ORDER BY id DESC').all()}));app.post('/api/admin/accounts',auth,(req,res)=>{let {kind='client',name,package_name='',myfxbook_url}=req.body;if(!name||!myfxbook_url)return res.status(400).json({message:'Name and Myfxbook URL are required'});let r=db.prepare('INSERT INTO accounts(kind,name,package_name,myfxbook_url) VALUES(?,?,?,?)').run(kind,name,package_name,myfxbook_url);res.json({ok:true,id:r.lastInsertRowid})});app.delete('/api/admin/accounts/:id',auth,(req,res)=>{db.prepare('UPDATE accounts SET active=0 WHERE id=?').run(req.params.id);res.json({ok:true})});app.get('/api/admin/socials',auth,(req,res)=>res.json({items:db.prepare('SELECT * FROM socials ORDER BY id').all()}));app.post('/api/admin/socials',auth,(req,res)=>{db.prepare('INSERT INTO socials(platform,url) VALUES(?,?)').run(req.body.platform,req.body.url);res.json({ok:true})});app.put('/api/admin/settings',auth,(req,res)=>{db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(req.body.key,req.body.value);res.json({ok:true})});app.get('/api/admin/pages',auth,(req,res)=>res.json({pages:db.prepare('SELECT * FROM pages ORDER BY id DESC').all()}));app.post('/api/admin/pages',auth,(req,res)=>{db.prepare('INSERT INTO pages(slug,title,body) VALUES(?,?,?)').run(req.body.slug,req.body.title,req.body.body);res.json({ok:true})});
+app.get('/admin/login',(req,res)=>res.sendFile(path.join(process.cwd(),'public','admin','login','index.html')));app.get('*',(req,res)=>res.sendFile(process.cwd()+'/dist/index.html'));app.listen(process.env.PORT||8787,()=>console.log('Trishul Capital running'));
