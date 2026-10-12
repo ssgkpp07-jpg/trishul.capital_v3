@@ -233,11 +233,11 @@ function AboutUsPage(){
     <div class="about-wrap">
       <div class="about-profile">
         <div class="profile-frame">
-          <img src="/images/trident.png" alt="Founder profile placeholder" />
+          <img src="${esc(`${API_BASE}/api/about/founder-image`)}" alt="Trishul Capital founder" onerror="this.onerror=null;this.src='/images/trident.png'" />
         </div>
+        <p class="founder-caption"><em><strong>Trishul (alias) Saran Santhan S S</strong></em><br><em><strong>Founder - Trishul Capital</strong></em><br><em><strong>India</strong></em></p>
       </div>
       <div class="about-copy">
-        <p><em><strong>Trishul (alias) Saran Santhan S S</strong></em><br><em><strong>Founder - Trishul Capital</strong></em><br><em><strong>India</strong></em></p>
         <p>Hi, I’m the founder of Trishul Capital. I built this system to bring disciplined, rule-based trading to people who want a more structured way to participate in the markets without constant manual monitoring.</p>
         <p>After more than <strong>5 years of experience in Forex trading</strong>, I created this automated system with one goal: <strong>Turn a disciplined trading strategy into a machine that can execute it consistently.</strong> It is designed to remove emotional interference, automate execution, manage positions and dynamically protect profits.</p>
         <p><strong>Not a magic machine. Not a guaranteed-money printer.</strong> It is a <strong>systematic trading machine built from experience, technology and automation</strong>, designed to pursue opportunities in the Forex market while maintaining predefined risk-management rules.</p>
