@@ -2,6 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/admin/portfolio/clients/:clientId", "destination": "/api/index?route=/api/admin/portfolio/clients/:clientId" },
     { "source": "/api/admin/:path*", "destination": "/api/index?route=/api/admin/:path*" },
     { "source": "/api/health", "destination": "/api/index?route=/api/health" },
     { "source": "/api/performance-details", "destination": "/api/index?route=/api/performance-details" },
