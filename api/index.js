@@ -21,35 +21,6 @@ const json = (statusCode, body) => {
 
 const bodyOf = (req) => req.body || {};
 
-const numberFrom = value => {
-  if (value == null) return null;
-  const match = String(value).replace(/,/g, '').match(/[-+]?\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : null;
-};
-
-const parseStats = html => {
-  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  const get = label => {
-    const match = text.match(new RegExp(`${label}\\s*[:|]?\\s*([+\\-]?\\d[\\d,.]*)(%|\\$)?`, 'i'));
-    return match ? numberFrom(match[1]) : null;
-  };
-  return {
-    gain: get('Gain'), daily: get('Daily'), monthly: get('Monthly'), yearly: get('Yearly'),
-    drawdown: get('Drawdown'), balance: get('Balance'), equity: get('Equity'), profit: get('Profit'),
-    pips: get('Pips'), trades: get('Trades'), profit_factor: get('Profit Factor')
-  };
-};
-
-const syncAccount = async account => {
-  const response = await fetch(account.myfxbook_url, { headers: { 'User-Agent': 'Mozilla/5.0 TrishulCapital/1.0' } });
-  if (!response.ok) throw new Error(`Myfxbook HTTP ${response.status}`);
-  const stats = parseStats(await response.text());
-  const { error: snapshotError } = await supabase.from('snapshots').insert({ account_id: account.id, ...stats });
-  if (snapshotError) throw snapshotError;
-  const { error: accountError } = await supabase.from('accounts').update({ last_sync: new Date().toISOString() }).eq('id', account.id);
-  if (accountError) throw accountError;
-};
-
 const authorized = (req) => {
   try {
     jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), secret);
@@ -102,18 +73,6 @@ export default async function handler(req, res) {
     if (method === 'GET' && path === '/api/portfolio') {
       const portfolio = await getPortfolio();
       return res.status(200).json({ summary: portfolio.summary, monthly: summarizePortfolioMonths(portfolio.events) });
-    }
-
-    if (method === 'GET' && path === '/api/accounts') {
-      const kind = req.query.kind || 'performance';
-      const { data, error } = await supabase.from('accounts').select('*').eq('kind', kind).eq('active', true).order('id', { ascending: false });
-      if (error) throw error;
-      const accounts = await Promise.all(data.map(async account => {
-        const { data: snapshots, error: snapshotError } = await supabase.from('snapshots').select('*').eq('account_id', account.id).order('captured_at', { ascending: false }).limit(1);
-        if (snapshotError) throw snapshotError;
-        return { ...account, stats: snapshots[0] || {} };
-      }));
-      return res.status(200).json({ accounts });
     }
 
     if (method === 'GET' && path === '/api/settings/contact') {
@@ -357,14 +316,6 @@ export default async function handler(req, res) {
       const { error } = await supabase.from('accounts').update({ active: false }).eq('id', id);
       if (error) throw error;
       return res.status(200).json({ ok: true });
-    }
-
-    if (method === 'POST' && path === '/api/admin/sync') {
-      const { data: accounts, error } = await supabase.from('accounts').select('*').eq('active', true);
-      if (error) throw error;
-      const results = await Promise.allSettled(accounts.map(syncAccount));
-      const failed = results.filter(result => result.status === 'rejected').length;
-      return res.status(200).json({ ok: failed === 0, synced: results.length - failed, failed });
     }
 
     if (method === 'GET' && path === '/api/admin/socials') {
