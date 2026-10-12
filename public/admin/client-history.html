@@ -41,6 +41,19 @@
     .account-heading h3{margin:0;color:var(--gold2)}
     .account-balance{color:#aaa}
     .share-note{margin-top:16px;padding:12px;border-left:3px solid var(--gold);background:#151208;color:#d4c9a8;line-height:1.5}
+    .share-dialog{width:min(580px,calc(100vw - 28px));max-height:92vh;overflow:auto;padding:22px;background:#0d0d0d;color:#eee;border:1px solid #574821;border-radius:10px}
+    .share-dialog::backdrop{background:#000b}
+    .share-dialog h2{margin:0;color:var(--gold2)}
+    .share-dialog p{line-height:1.5}
+    .share-dialog label{display:block;margin:12px 0 6px;color:#ddd;font-weight:bold}
+    .share-dialog textarea{width:100%;min-height:105px;resize:vertical;padding:12px;background:#080808;color:#eee;border:1px solid #454239;border-radius:6px;font:14px/1.55 Arial,sans-serif}
+    .share-file{display:flex;align-items:center;gap:12px;margin:12px 0;padding:11px;border:1px solid #36332c;border-radius:6px;background:#090909}
+    .share-file-icon{display:grid;place-items:center;width:38px;height:44px;border:1px solid var(--gold);border-radius:4px;color:var(--gold2);font-weight:bold}
+    .share-dialog .bar{margin-top:14px}
+    .share-dialog .bar button{width:auto}
+    .share-dialog button:disabled{opacity:.5;cursor:wait}
+    .share-status{margin-top:12px;padding:11px 12px;border-left:3px solid var(--gold);background:#151208;color:#d4c9a8;line-height:1.5}
+    .share-status.error{border-color:#b85b50;background:#190d0c;color:#ffb6ad}
     @media(max-width:650px){body{padding:12px}main{padding:18px}.top,.toolbar,.history-heading{align-items:stretch;flex-direction:column}.actions{width:100%}.actions>*{flex:1;text-align:center}h1{font-size:26px}.summary{grid-template-columns:1fr 1fr}.account-heading{align-items:flex-start;flex-direction:column}}
     @media print{
       @page{margin:16mm}
@@ -58,18 +71,17 @@
   </style>
 </head>
 <body>
-  <main>
+  <main id="clientReport">
     <header class="top">
       <div>
         <div class="eyebrow">Portfolio ledger · Client history</div>
         <h1 id="clientName">Client transaction history</h1>
         <p id="clientId" class="subtle"></p>
       </div>
-      <div class="actions">
+      <div class="actions pdf-exclude">
         <a class="button-link" href="/admin/login">← Back to Portfolio Ledger</a>
         <button type="button" onclick="window.print()">Print / Save PDF</button>
-        <button type="button" onclick="prepareWhatsApp()">Prepare WhatsApp</button>
-        <button type="button" onclick="prepareEmail()">Prepare email</button>
+        <button type="button" id="openShareDialog">Share PDF + message</button>
       </div>
     </header>
     <hr class="rule">
@@ -82,21 +94,32 @@
     <section>
       <div class="history-heading">
         <h2>Account-wise transactions</h2>
-        <label class="tag">Show accounts
+        <label class="tag pdf-exclude">Show accounts
           <select id="accountFilter" aria-label="Filter by account"><option value="">All accounts</option></select>
         </label>
       </div>
-      <div class="toolbar">
+      <div class="toolbar pdf-exclude">
         <span class="tag" id="accountCount">Loading accounts…</span>
         <span>Newest transactions first within each account</span>
       </div>
       <div id="accountHistories"><p class="empty">Loading transaction history…</p></div>
-      <div id="pageError" class="notice" role="alert" hidden></div>
-      <p class="share-note"><strong>Manual sharing:</strong> Use Print / Save PDF and save the report, then attach that PDF yourself in WhatsApp or email. Prepare WhatsApp and Prepare email open editable, prefilled drafts for you to review and send manually.</p>
+      <div id="pageError" class="notice pdf-exclude" role="alert" hidden></div>
+      <p class="share-note pdf-exclude"><strong>Share the color PDF:</strong> Choose WhatsApp or email to open a prefilled draft. The report PDF downloads to your device so you can attach it in that app yourself. Use Print / Save PDF separately for a printer-friendly black-and-white copy.</p>
     </section>
   </main>
+  <dialog id="shareDialog" class="share-dialog">
+    <h2>Share client report</h2>
+    <p>Your full account-wise transaction history stays in the color PDF. Choose WhatsApp or email to open a prefilled draft, then attach the downloaded PDF yourself.</p>
+    <label for="shareMessage">Message to share with PDF</label>
+    <textarea id="shareMessage"></textarea>
+    <div class="share-file"><span class="share-file-icon">PDF</span><span><strong id="shareFilename">Client-Report.pdf</strong><br><small>Color report · complete account-wise history</small></span></div>
+    <div id="shareStatus" class="share-status" role="status">Prepare the color PDF first. Then choose WhatsApp or email to open a draft with the message.</div>
+    <div class="bar"><button type="button" id="closeShareDialog">Cancel</button><button type="button" id="generatePdfButton">Prepare color PDF</button><button type="button" id="whatsAppDraftButton" disabled>Open WhatsApp</button><button type="button" id="emailDraftButton" disabled>Open email</button></div>
+    <p><small>Each app opens for your review. The PDF is downloaded and must be attached manually before sending.</small></p>
+  </dialog>
   <script src="/config.js"></script>
-  <script>
+  <script type="module">
+    import { createClientReportPdf } from '/admin/client-report-pdf.js';
     const API_BASE = (window.TRISHUL_API_URL || '').replace(/\/$/, '');
     const token = sessionStorage.getItem('trishul_admin_token');
     const clientId = new URLSearchParams(location.search).get('client_id') || '';
@@ -108,6 +131,8 @@
     let clientRecord = null;
     let clientName = '';
     let accountSummaries = [];
+    let preparedPdf = null;
+    let shareFilename = '';
 
     async function getJson(path) {
       const response = await fetch(API_BASE + path, {headers:{'Content-Type':'application/json',Authorization:'Bearer ' + token}});
@@ -135,10 +160,8 @@
       }).sort((a,b) => a.number.localeCompare(b.number,undefined,{numeric:true,sensitivity:'base'}));
     }
 
-    function renderHistory() {
-      const selected = $('accountFilter').value;
-      const visibleAccounts = selected ? accountSummaries.filter(account => account.number === selected) : accountSummaries;
-      $('accountHistories').innerHTML = visibleAccounts.map(account => {
+    function renderHistoryMarkup(accounts) {
+      return accounts.map(account => {
         const rows = account.events.map(event => {
           const debit = event.event_type === 'offboarded' || event.event_type === 'profit_withdrawn';
           const label = labels[event.event_type] || event.event_type || 'Transaction';
@@ -149,40 +172,100 @@
       }).join('') || '<p class="empty">No transactions found for this client.</p>';
     }
 
-    function buildClientReport() {
-      const totalOnboarded = clientEvents.filter(event => !event.deleted_at && ['onboarded','funds_added'].includes(event.event_type)).reduce((sum,event) => sum + (Number(event.amount)||0),0);
-      const totalProfits = clientEvents.filter(event => !event.deleted_at && event.event_type === 'profit_withdrawn').reduce((sum,event) => sum + (Number(event.amount)||0),0);
-      const name = clientName || 'Client';
-      const lines = [
-        `Client transaction summary for ${name}`,
-        `Client ID: ${clientId}`,
-        `Accounts: ${accountSummaries.length}`,
-        `Total funds onboarded: ${money(totalOnboarded)}`,
-        `Profits withdrawn: ${money(totalProfits)}`,
-        `Transactions: ${clientEvents.filter(event => !event.deleted_at).length}`,
-        '',
-        ...accountSummaries.flatMap(account => [
-          `Account ${account.number} — current funds: ${money(account.balance)}`,
-          ...account.events.map(event => `${new Date(event.created_at).toLocaleString()} | ${labels[event.event_type] || event.event_type} | ${money(event.amount)}`),
-          ''
-        ]),
-        'For any questions, please contact Trishul Capital.'
-      ];
-      return lines.join('\n');
+    function renderHistory() {
+      const selected = $('accountFilter').value;
+      const visibleAccounts = selected ? accountSummaries.filter(account => account.number === selected) : accountSummaries;
+      $('accountHistories').innerHTML = renderHistoryMarkup(visibleAccounts);
     }
 
-    function prepareWhatsApp() {
-      const phone = String(clientRecord?.whatsapp_number || '').replace(/\D/g,'');
-      if (!phone) { $('pageError').textContent = 'This client has no WhatsApp number saved. Add it from Admin → Client Registration → Edit.'; $('pageError').hidden = false; return; }
-      const text = `Hello ${clientName},\n\n${buildClientReport()}\n\n— Trishul Capital`;
-      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,'_blank','noopener,noreferrer');
+    function buildShareMessage() {
+      return `Hello ${clientName || 'Client'},\n\nPlease find your Trishul Capital client report attached.\n\nKind regards,\nTrishul Capital`;
     }
 
-    function prepareEmail() {
-      const email = String(clientRecord?.email || '').trim();
-      if (!email) { $('pageError').textContent = 'This client has no email saved. Add it from Admin → Client Registration → Edit.'; $('pageError').hidden = false; return; }
-      const subject = `Client transaction history — ${clientName} (${clientId})`;
-      window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildClientReport())}`,'_blank','noopener,noreferrer');
+    function buildPdfSource() {
+      const report = $('clientReport').cloneNode(true);
+      report.querySelector('#accountHistories').innerHTML = renderHistoryMarkup(accountSummaries);
+      return report;
+    }
+
+    function setShareStatus(message, isError = false) {
+      const status = $('shareStatus');
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+
+    function openShareDialog() {
+      preparedPdf = null;
+      shareFilename = `Client-Report-${clientId.replace(/[^a-zA-Z0-9_-]/g, '-') || 'client'}.pdf`;
+      $('shareFilename').textContent = shareFilename;
+      $('shareMessage').value = buildShareMessage();
+      $('whatsAppDraftButton').disabled = true;
+      $('emailDraftButton').disabled = true;
+      $('generatePdfButton').disabled = false;
+      setShareStatus('Prepare the color PDF first. Then choose WhatsApp or email to open a draft with the message.');
+      $('shareDialog').showModal();
+    }
+
+    async function prepareColorPdf() {
+      const button = $('generatePdfButton');
+      button.disabled = true;
+      $('whatsAppDraftButton').disabled = true;
+      $('emailDraftButton').disabled = true;
+      setShareStatus('Generating the color PDF on this device…');
+      try {
+        preparedPdf = await createClientReportPdf(buildPdfSource(), shareFilename);
+        $('whatsAppDraftButton').disabled = false;
+        $('emailDraftButton').disabled = false;
+        setShareStatus('Color PDF is ready. Choose WhatsApp or email; the PDF will download so you can attach it.');
+      } catch (error) {
+        setShareStatus(`Could not create the PDF: ${error.message}`, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function downloadPdf(file) {
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.name;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function openMessageDraft(channel) {
+      if (!preparedPdf) {
+        setShareStatus('Prepare the PDF before sharing.', true);
+        return;
+      }
+      const message = $('shareMessage').value.trim();
+      let draftUrl;
+      if (channel === 'whatsapp') {
+        const phone = String(clientRecord?.whatsapp_number || '').replace(/\D/g, '');
+        const params = new URLSearchParams({text: message});
+        draftUrl = phone ? `https://wa.me/${phone}?${params}` : `https://wa.me/?${params}`;
+      } else {
+        const params = new URLSearchParams({
+          view: 'cm',
+          fs: '1',
+          to: String(clientRecord?.email || '').trim(),
+          su: `Client transaction history — ${clientName || 'Client'} (${clientId})`,
+          body: message
+        });
+        draftUrl = `https://mail.google.com/mail/?${params}`;
+      }
+      const opened = window.open('about:blank', '_blank');
+      if (!opened) {
+        setShareStatus('Your browser blocked the app window. Allow pop-ups for this site and try again.', true);
+        return;
+      }
+      opened.opener = null;
+      opened.location.href = draftUrl;
+      downloadPdf(preparedPdf);
+      setShareStatus(`The ${channel === 'whatsapp' ? 'WhatsApp' : 'email'} draft opened with your message, and the color PDF was downloaded. Attach the downloaded PDF in the app before sending.`);
     }
 
     async function loadClientHistory() {
@@ -213,6 +296,16 @@
     }
 
     $('accountFilter').addEventListener('change', renderHistory);
+    $('openShareDialog').addEventListener('click', openShareDialog);
+    $('closeShareDialog').addEventListener('click', () => $('shareDialog').close());
+    $('shareDialog').addEventListener('close', () => {
+      preparedPdf = null;
+      $('whatsAppDraftButton').disabled = true;
+      $('emailDraftButton').disabled = true;
+    });
+    $('generatePdfButton').addEventListener('click', prepareColorPdf);
+    $('whatsAppDraftButton').addEventListener('click', () => openMessageDraft('whatsapp'));
+    $('emailDraftButton').addEventListener('click', () => openMessageDraft('email'));
     loadClientHistory().catch(error => {
       $('pageError').textContent = error.message;
       $('pageError').hidden = false;
