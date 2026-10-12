@@ -120,6 +120,8 @@ export default async function handler(req, res) {
         client_id: String(input.client_id || '').trim().toUpperCase(),
         first_name: String(input.first_name || '').trim(),
         second_name: String(input.second_name || '').trim(),
+        email: String(input.email || '').trim().toLowerCase(),
+        whatsapp_number: String(input.whatsapp_number || '').trim(),
         national_id: String(input.national_id || '').trim(),
         address_line1: String(input.address_line1 || '').trim(),
         address_line2: String(input.address_line2 || '').trim(),
@@ -127,6 +129,8 @@ export default async function handler(req, res) {
         country: String(input.country || '').trim(), pincode: String(input.pincode || '').trim()
       };
       if (Object.entries(client).some(([field, value]) => field !== 'address_line2' && !value)) return res.status(400).json({ message: 'Complete all required client registration fields' });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email)) return res.status(400).json({ message: 'Enter a valid client email address' });
+      if (!/^\+[1-9]\d{7,14}$/.test(client.whatsapp_number)) return res.status(400).json({ message: 'Enter the WhatsApp number in international format, e.g. +14155552671' });
       const { error } = await supabase.from('portfolio_clients').insert(client);
       if (error?.code === '23505') return res.status(409).json({ message: 'That Client ID is already registered' });
       if (error) throw error;
