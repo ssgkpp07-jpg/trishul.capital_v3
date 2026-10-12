@@ -15,8 +15,6 @@ const api = async (path, opts = {}) => {
 };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-const fmtPct = v => v == null ? '—' : `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`;
-const fmtMoney = v => v == null ? '—' : `$${Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 let publicPortfolioEvents=[];
 let portfolioChart;
 let portfolioRefreshTimer;
@@ -173,20 +171,12 @@ function Packages(){
  return `<section class="section page-section packages-page"><div class="section-head"><span class="eyebrow">OUR SYSTEMS</span><h2>Choose your <span>automated edge.</span></h2><p>Both packages are currently available free of charge.</p></div><div class="pricing-grid">${packageData.map(PackageCard).join('')}</div></section>`;
 }
 
-function AccountCard(a, myfxbookUrl=a.myfxbook_url){
- const s=a.stats||{};
- return `<article class="card performance-card"><div class="card-top"><div><span class="pill">${esc(a.package_name||'ACCOUNT')}</span><h3>${esc(a.name)}</h3></div><span class="updated">Updated ${esc(s.updatedAgo||a.last_sync||'—')}</span></div>
- <div class="metrics"><div><label>Gain</label><strong>${fmtPct(s.gain)}</strong></div><div><label>Daily</label><strong>${fmtPct(s.daily)}</strong></div><div><label>Monthly</label><strong>${fmtPct(s.monthly)}</strong></div><div><label>Drawdown</label><strong>${fmtPct(s.drawdown)}</strong></div><div><label>Balance</label><strong>${fmtMoney(s.balance)}</strong></div><div><label>Equity</label><strong>${fmtMoney(s.equity)}</strong></div><div><label>Profit</label><strong>${fmtMoney(s.profit)}</strong></div><div><label>Account Value</label><strong>${fmtMoney(s.equity ?? s.balance)}</strong></div></div>
- <div class="card-actions"><a class="outline-btn" href="${esc(myfxbookUrl)}" target="_blank" rel="noopener">Myfxbook</a><a class="gold-btn" href="${esc(myfxbookUrl)}" target="_blank" rel="noopener">Know More</a></div></article>`;
-}
-async function getAccounts(kind){ try{return (await api(`/api/accounts?kind=${kind}`)).accounts||[]}catch{return []} }
 function CopyField(label, value, copyable = true){
   const safeValue = String(value ?? '');
   const button = copyable ? `<button type="button" class="copy-btn" data-copy="${safeValue.replace(/"/g, '&quot;')}" aria-label="Copy ${esc(label)}" title="Copy">⧉</button>` : '';
   return `<div class="mt5-field"><label>${esc(label)}</label><div class="mt5-field-box"><span>${esc(safeValue)}</span>${button}</div></div>`;
 }
 async function PerformancePage(){
- const accounts=await getAccounts('performance');
  let loginBoxes=[];
  let detailsError='';
  try{loginBoxes=(await api('/api/performance-details')).accounts||[]}
@@ -205,13 +195,9 @@ async function PerformancePage(){
           ['Server',box.server]
         ].map(([label,value,copyable=true])=>CopyField(label,value,copyable)).join('')}
        </div>
-       <a class="status-results-btn" href="${esc(box.myfxbook_url)}" target="_blank" rel="noopener">View Results of Myfxbook</a>
    </div>
  `).join('');
- const urlsByAccount=Object.fromEntries(loginBoxes.map(box=>[box.name,box.myfxbook_url]));
- const comboAccount=loginBoxes.find(box=>box.id==='combo');
- const metricAccounts=accounts.filter(account=>!/^gold\s*ea$/i.test(account.name||'')&&!/^gold\s*ea$/i.test(account.package_name||'')&&(!comboAccount||(account.name!==comboAccount.name&&account.package_name!==comboAccount.name&&!/tirplet-combo/i.test(account.myfxbook_url))));
- return `<section class="section page-section"><div class="section-head"><span class="eyebrow">LIVE ACCOUNT PERFORMANCE</span><h2>Performance, <span>without the guesswork.</span></h2></div>${detailsError?`<p class="performance-load-error" role="alert">Account details could not be loaded: ${esc(detailsError)}</p>`:''}<div class="account-status-grid">${statusPanels}</div><aside class="mt5-help-panel" aria-labelledby="mt5-help-title"><div class="mt5-help-heading"><span class="eyebrow">QUICK GUIDE</span><h3 id="mt5-help-title">How to log in to MT5</h3></div><div class="mt5-help-devices"><section class="mt5-help-device"><h4>Android</h4><ol><li>Open the MetaTrader 5 app.</li><li>Tap <strong>Menu (☰)</strong> in the top-left, then <strong>Manage Accounts</strong>.</li><li>Tap <strong>+</strong>, search your broker (e.g., Exness, BlackBull, or FBS), and select it.</li><li>Select the exact server assigned to your account (live or demo).</li><li>Enter your account number (Login) and password, then tap <strong>Login</strong>.</li></ol></section><section class="mt5-help-device"><h4>iPhone / iPad</h4><ol><li>Open the MetaTrader 5 app and go to <strong>Settings</strong> in the bottom-right.</li><li>Tap <strong>New Account</strong> (or the arrow / <strong>+</strong> near your account name).</li><li>Search for your broker and select it.</li><li>Select the right server for your account (live or demo).</li><li>Enter your Login ID and password, then tap <strong>Sign In</strong>.</li></ol></section></div></aside><div class="cards performance-grid">${metricAccounts.map(account=>AccountCard(account,urlsByAccount[account.name]||account.myfxbook_url)).join('')}</div></section>`;
+ return `<section class="section page-section"><div class="section-head"><span class="eyebrow">TRADING ACCOUNT ACCESS</span><h2>Your trading <span>accounts.</span></h2></div>${detailsError?`<p class="performance-load-error" role="alert">Account details could not be loaded: ${esc(detailsError)}</p>`:''}<div class="account-status-grid">${statusPanels}</div><aside class="mt5-help-panel" aria-labelledby="mt5-help-title"><div class="mt5-help-heading"><span class="eyebrow">QUICK GUIDE</span><h3 id="mt5-help-title">How to log in to MT5</h3></div><div class="mt5-help-devices"><section class="mt5-help-device"><h4>Android</h4><ol><li>Open the MetaTrader 5 app.</li><li>Tap <strong>Menu (☰)</strong> in the top-left, then <strong>Manage Accounts</strong>.</li><li>Tap <strong>+</strong>, search your broker (e.g., Exness, BlackBull, or FBS), and select it.</li><li>Select the exact server assigned to your account (live or demo).</li><li>Enter your account number (Login) and password, then tap <strong>Login</strong>.</li></ol></section><section class="mt5-help-device"><h4>iPhone / iPad</h4><ol><li>Open the MetaTrader 5 app and go to <strong>Settings</strong> in the bottom-right.</li><li>Tap <strong>New Account</strong> (or the arrow / <strong>+</strong> near your account name).</li><li>Search for your broker and select it.</li><li>Select the right server for your account (live or demo).</li><li>Enter your Login ID and password, then tap <strong>Sign In</strong>.</li></ol></section></div></aside></section>`;
 }
 const portfolioEventLabel=type=>({onboarded:'Onboarded',funds_added:'Funds added',offboarded:'Offboarded',profit_withdrawn:'Profit withdrawn'}[type]||type);
 const fmtPortfolioMoney=value=>new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(value)||0);
