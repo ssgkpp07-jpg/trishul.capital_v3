@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
 
   const requestedRoute = typeof req.query?.route === 'string' ? req.query.route : '';
-  const path = requestedRoute.startsWith('/api/admin/')
+  const path = requestedRoute.startsWith('/api/')
     ? requestedRoute
     : req.url.split('?')[0];
   const method = req.method;
