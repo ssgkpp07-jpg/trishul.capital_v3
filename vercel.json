@@ -11,7 +11,14 @@
     { "source": "/api/settings/contact", "destination": "/api/index?route=/api/settings/contact" },
     { "source": "/api/settings/socials", "destination": "/api/index?route=/api/settings/socials" },
     { "source": "/admin/login", "destination": "/admin/login/index.html" },
-    { "source": "/portfolio", "destination": "/index.html" }
+    { "source": "/about-us", "destination": "/index.html" },
+    { "source": "/packages", "destination": "/index.html" },
+    { "source": "/performance", "destination": "/index.html" },
+    { "source": "/portfolio", "destination": "/index.html" },
+    { "source": "/contact", "destination": "/index.html" },
+    { "source": "/privacy-policy", "destination": "/index.html" },
+    { "source": "/risk-policy", "destination": "/index.html" },
+    { "source": "/terms-conditions", "destination": "/index.html" }
   ],
   "functions": {
     "api/index.js": {
