@@ -114,6 +114,20 @@ export default async function handler(req, res) {
       return res.status(200).json({ clients: data || [] });
     }
 
+    if (method === 'PUT' && path.startsWith('/api/admin/portfolio/clients/') && path.endsWith('/contact')) {
+      const clientId = decodeURIComponent(path.slice('/api/admin/portfolio/clients/'.length, -'/contact'.length)).trim().toUpperCase();
+      const input = bodyOf(req);
+      const email = String(input.email || '').trim().toLowerCase();
+      const whatsappNumber = String(input.whatsapp_number || '').trim();
+      if (!clientId) return res.status(400).json({ message: 'Client ID is required' });
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ message: 'Enter a valid client email address or leave it blank' });
+      if (whatsappNumber && !/^\+[1-9]\d{7,14}$/.test(whatsappNumber)) return res.status(400).json({ message: 'Enter the WhatsApp number in international format, e.g. +14155552671, or leave it blank' });
+      const { data, error } = await supabase.from('portfolio_clients').update({ email, whatsapp_number: whatsappNumber }).eq('client_id', clientId).select('*').maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ message: 'Registered client not found' });
+      return res.status(200).json({ client: data });
+    }
+
     if (method === 'POST' && path === '/api/admin/portfolio/clients') {
       const input = bodyOf(req);
       const client = {
