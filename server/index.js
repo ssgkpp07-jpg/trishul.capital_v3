@@ -21,6 +21,24 @@ if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.
 db.exec('CREATE INDEX IF NOT EXISTS portfolio_events_account_created_idx ON portfolio_events(account_number,created_at DESC)');
 try{db.exec('ALTER TABLE accounts ADD COLUMN portfolio_image TEXT')}catch{}
 for(const [k,v] of [['contact_email','contact@trishulcapital.com'],['contact_whatsapp',''],['contact_telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run(k,v);if(!db.prepare('SELECT COUNT(*) c FROM socials').get().c)for(const x of [['Instagram',''],['WhatsApp',''],['Telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT INTO socials(platform,url) VALUES(?,?)').run(...x);
+const contactCardProfileDefaults={title:'Trishul Capital',subtitle:'Account Management & Expert Advisor Services',tagline:'AUTOMATED · SYSTEMATIC · TRANSPARENT',logo:'/images/trident.png'};
+for(const [field,value] of Object.entries(contactCardProfileDefaults))db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run(`contact_card_${field}`,value);
+db.exec('CREATE TABLE IF NOT EXISTS contact_buttons(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,url TEXT NOT NULL,icon TEXT NOT NULL,position INTEGER NOT NULL DEFAULT 0)');
+if(!db.prepare("SELECT value FROM settings WHERE key='contact_buttons_seeded'").get()){
+ const seedContactButtons=db.transaction(()=>{
+  if(!db.prepare('SELECT COUNT(*) c FROM contact_buttons').get().c){
+   const insert=db.prepare('INSERT INTO contact_buttons(name,url,icon,position) VALUES(?,?,?,?)');
+   for(const [position,button] of [
+    ['Visit Trishul Capital','/','🌐'],
+    ['Instagram','https://www.instagram.com/trishulcapital','◎'],
+    ['Trishul Capital on Telegram','https://t.me/Trishul_Capital','➤'],
+    ['Email Trishul Capital','mailto:mailtotrishulcapital@gmail.com','✉']
+   ].entries())insert.run(button[0],button[1],button[2],position);
+  }
+  db.prepare("INSERT INTO settings(key,value) VALUES('contact_buttons_seeded','1')").run();
+ });
+ seedContactButtons();
+}
 const defaultPerformanceAccounts=[
  {id:'gold',name:'Gold EA',status:'Online',broker:'GlobalPrime or FMGP Trading Group Pty Ltd',account_number:'5013649',investor_password:'*wgR7D21K6',server:'GlobalPrime-Trade',myfxbook_url:'https://www.myfxbook.com/portfolio/moon-ea/12175434'},
  {id:'combo',name:'Combo EA',status:'Online',broker:'TickMill Ltd',account_number:'55924704',investor_password:'2+fH>0nD&mQ4',server:'TickMill - Live',myfxbook_url:'https://www.myfxbook.com/portfolio/tirplet-combo/12171732'}
@@ -42,11 +60,111 @@ const defaultPortfolioMessageTemplates={
  profit_withdrawn:'Hello {{client_name}},\n\nYour profit withdrawal has been recorded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nProfit withdrawn: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital'
 };
 app.use('/api',(req,res,next)=>{res.set('Cache-Control','no-store, max-age=0');next()});app.get('/api/health',(req,res)=>res.json({ok:true,service:'trishul-capital-api'}));
+const founderImageKey='about_founder_image',maxFounderImageBytes=5*1024*1024;
+const founderImageTypes={
+ 'image/jpeg':buffer=>buffer.length>=3&&buffer[0]===0xff&&buffer[1]===0xd8&&buffer[2]===0xff,
+ 'image/png':buffer=>buffer.length>=8&&buffer.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a])),
+ 'image/webp':buffer=>buffer.length>=12&&buffer.toString('ascii',0,4)==='RIFF'&&buffer.toString('ascii',8,12)==='WEBP'
+};
+const contactButtonIcons=new Set(['🌐','◎','➤','✉','☎','f','▶','in','✦']);
+const maxContactButtonIconBytes=512*1024;
+function isValidContactButtonIcon(icon){
+ if(typeof icon!=='string')return false;
+ if(contactButtonIcons.has(icon))return true;
+ const match=/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(icon);
+ if(!match)return false;
+ const buffer=Buffer.from(match[2],'base64');
+ return buffer.length>0&&buffer.length<=maxContactButtonIconBytes&&buffer.toString('base64')===match[2]&&founderImageTypes[match[1]](buffer);
+}
+function validateContactButton({name,url,icon}){
+ const cleanName=typeof name==='string'?name.trim():'';
+ const cleanUrl=typeof url==='string'?url.trim():'';
+ if(!cleanName||cleanName.length>48)return {error:'Button name must be between 1 and 48 characters'};
+ if(!cleanUrl||cleanUrl.length>2048||/[\u0000-\u001f]/.test(cleanUrl))return {error:'Enter a valid hyperlink'};
+ const relativeUrl=cleanUrl.startsWith('/')&&!cleanUrl.startsWith('//')&&!cleanUrl.includes('\\');
+ const absoluteUrl=/^(https?:\/\/|mailto:|tel:)/i.test(cleanUrl);
+ if(!relativeUrl&&!absoluteUrl)return {error:'Use an https, http, mailto, tel, or same-site path URL'};
+ if(absoluteUrl&&/^(https?:\/\/)/i.test(cleanUrl)){
+  try{new URL(cleanUrl)}catch{return {error:'Enter a valid hyperlink'}}
+ }
+ if(!isValidContactButtonIcon(icon))return {error:'Choose a listed icon or upload a valid PNG, JPEG, or WebP icon (512 KB maximum)'};
+ return {value:{name:cleanName,url:cleanUrl,icon}};
+}
+app.get('/api/about/founder-image',(req,res)=>{
+ const image=db.prepare('SELECT value FROM settings WHERE key=?').get(founderImageKey)?.value;
+ if(!image)return res.status(404).json({message:'No founder image has been uploaded'});
+ const match=/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
+ if(!match)return res.status(500).json({message:'The saved founder image is invalid'});
+ const buffer=Buffer.from(match[2],'base64');
+ if(!founderImageTypes[match[1]](buffer))return res.status(500).json({message:'The saved founder image is invalid'});
+ res.set('Content-Type',match[1]).set('X-Content-Type-Options','nosniff').send(buffer);
+});
+app.put('/api/admin/about/founder-image',auth,(req,res)=>{
+ const image=req.body?.image;
+ const match=typeof image==='string'&&/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
+ if(!match)return res.status(400).json({message:'Upload a valid JPEG, PNG, or WebP image'});
+ const buffer=Buffer.from(match[2],'base64');
+ if(!buffer.length||buffer.length>maxFounderImageBytes)return res.status(400).json({message:'Founder images must be 5 MB or smaller'});
+ if(buffer.toString('base64')!==match[2]||!founderImageTypes[match[1]](buffer))return res.status(400).json({message:'The uploaded file is not a valid JPEG, PNG, or WebP image'});
+ db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(founderImageKey,image);
+ res.json({ok:true});
+});
+app.delete('/api/admin/about/founder-image',auth,(req,res)=>{
+ db.prepare('DELETE FROM settings WHERE key=?').run(founderImageKey);
+ res.json({ok:true});
+});
 app.post('/api/admin/login',(req,res)=>{const username=String(req.body?.username||'').trim().toLowerCase(),password=String(req.body?.password||'');if(username!==ADMIN_USER||password!==ADMIN_PASS)return res.status(401).json({message:'Invalid credentials'});res.json({token:jwt.sign({sub:ADMIN_USER},SECRET,{expiresIn:'12h'})})});
 
 app.get('/api/portfolio',(req,res)=>{const portfolio=getPortfolio();res.json({summary:portfolio.summary,monthly:summarizePortfolioMonths(portfolio.events)})});
 app.get('/api/performance-details',(req,res)=>res.json({accounts:getPerformanceAccounts()}));
 app.get('/api/settings/contact',(req,res)=>res.json({email:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_email')?.value,whatsapp:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_whatsapp')?.value,telegram:db.prepare('SELECT value FROM settings WHERE key=?').get('contact_telegram')?.value}));app.get('/api/settings/socials',(req,res)=>res.json({items:db.prepare('SELECT * FROM socials WHERE active=1 ORDER BY id').all()}));
+function getContactCardProfile(){return Object.fromEntries(Object.keys(contactCardProfileDefaults).map(field=>[field,db.prepare('SELECT value FROM settings WHERE key=?').get(`contact_card_${field}`)?.value??contactCardProfileDefaults[field]]))}
+app.get('/api/contact-card/profile',(req,res)=>res.json(getContactCardProfile()));
+app.get('/api/admin/contact-card/profile',auth,(req,res)=>res.json(getContactCardProfile()));
+app.put('/api/admin/contact-card/profile',auth,(req,res)=>{
+ const body=req.body||{},title=typeof body.title==='string'?body.title.trim():'',subtitle=typeof body.subtitle==='string'?body.subtitle.trim():'',tagline=typeof body.tagline==='string'?body.tagline.trim():'',logo=body.logo;
+ if(!title||title.length>80)return res.status(400).json({message:'Title must be between 1 and 80 characters'});
+ if(subtitle.length>160)return res.status(400).json({message:'Subtitle must be 160 characters or fewer'});
+ if(tagline.length>100)return res.status(400).json({message:'Tagline must be 100 characters or fewer'});
+ let validLogo=logo==='/images/trident.png';
+ if(typeof logo==='string'){
+  const match=/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(logo);
+  if(match){
+   const buffer=Buffer.from(match[2],'base64');
+   validLogo=buffer.length>0&&buffer.length<=3*1024*1024&&buffer.toString('base64')===match[2]&&founderImageTypes[match[1]](buffer);
+  }
+ }
+ if(!validLogo)return res.status(400).json({message:'Upload a valid JPEG, PNG, or WebP logo (3 MB maximum)'});
+ const update=db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+ const save=db.transaction(()=>{for(const [field,value] of Object.entries({title,subtitle,tagline,logo}))update.run(`contact_card_${field}`,value)});
+ save();
+ res.json({ok:true});
+});
+app.get('/api/contact-buttons',(req,res)=>res.json({items:db.prepare('SELECT id,name,url,icon FROM contact_buttons ORDER BY position,id').all()}));
+app.get('/api/admin/contact-buttons',auth,(req,res)=>res.json({items:db.prepare('SELECT id,name,url,icon,position FROM contact_buttons ORDER BY position,id').all()}));
+app.post('/api/admin/contact-buttons',auth,(req,res)=>{
+ const checked=validateContactButton(req.body||{});
+ if(checked.error)return res.status(400).json({message:checked.error});
+ const position=db.prepare('SELECT COALESCE(MAX(position),-1)+1 AS next FROM contact_buttons').get().next;
+ const result=db.prepare('INSERT INTO contact_buttons(name,url,icon,position) VALUES(?,?,?,?)').run(checked.value.name,checked.value.url,checked.value.icon,position);
+ res.status(201).json({ok:true,id:result.lastInsertRowid});
+});
+app.put('/api/admin/contact-buttons/:id',auth,(req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({message:'Invalid contact button id'});
+ const checked=validateContactButton(req.body||{});
+ if(checked.error)return res.status(400).json({message:checked.error});
+ const result=db.prepare('UPDATE contact_buttons SET name=?,url=?,icon=? WHERE id=?').run(checked.value.name,checked.value.url,checked.value.icon,id);
+ if(!result.changes)return res.status(404).json({message:'Contact button not found'});
+ res.json({ok:true});
+});
+app.delete('/api/admin/contact-buttons/:id',auth,(req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({message:'Invalid contact button id'});
+ const result=db.prepare('DELETE FROM contact_buttons WHERE id=?').run(id);
+ if(!result.changes)return res.status(404).json({message:'Contact button not found'});
+ res.json({ok:true});
+});
 app.get('/api/admin/performance-details',auth,(req,res)=>res.json({accounts:getPerformanceAccounts()}));
 app.put('/api/admin/performance-details',auth,(req,res)=>{
  const {accounts}=req.body||{};
