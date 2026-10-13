@@ -182,11 +182,16 @@ async function PerformancePage(){
  let detailsError='';
  try{loginBoxes=(await api('/api/performance-details')).accounts||[]}
  catch(error){detailsError=error.message}
- const statusPanels = loginBoxes.map(box => `
+ const statusPanels = loginBoxes.map(box => {
+  const status=String(box.status??'').trim()||'Online';
+  const myfxbookLink=/^https:\/\/www\.myfxbook\.com(?:\/|$)/i.test(box.myfxbook_url||'')
+   ?`<a class="status-results-btn" href="${esc(box.myfxbook_url)}" target="_blank" rel="noopener noreferrer">View ${esc(box.name)} on Myfxbook <span aria-hidden="true">↗</span></a>`
+   :'';
+  return `
    <div class="account-status-panel mt5-box">
        <div class="status-header-row">
        <strong>${esc(box.name)}</strong>
-       <span class="online-status"><i></i>${esc(box.status)}</span>
+       <span class="online-status"><i></i>${esc(status)}</span>
        </div>
        <div class="mt5-login-fields">
         ${[
@@ -196,8 +201,10 @@ async function PerformancePage(){
           ['Server',box.server]
         ].map(([label,value,copyable=true])=>CopyField(label,value,copyable)).join('')}
        </div>
+       ${myfxbookLink}
    </div>
- `).join('');
+ `;
+ }).join('');
  return `<section class="section page-section"><div class="section-head"><span class="eyebrow">TRADING ACCOUNT ACCESS</span><h2>Your trading <span>accounts.</span></h2></div>${detailsError?`<p class="performance-load-error" role="alert">Account details could not be loaded: ${esc(detailsError)}</p>`:''}<div class="account-status-grid">${statusPanels}</div><aside class="mt5-help-panel" aria-labelledby="mt5-help-title"><div class="mt5-help-heading"><span class="eyebrow">QUICK GUIDE</span><h3 id="mt5-help-title">How to log in to MT5</h3></div><div class="mt5-help-devices"><section class="mt5-help-device"><h4>Android</h4><ol><li>Open the MetaTrader 5 app.</li><li>Tap <strong>Menu (☰)</strong> in the top-left, then <strong>Manage Accounts</strong>.</li><li>Tap <strong>+</strong>, search your broker (e.g., Exness, BlackBull, or FBS), and select it.</li><li>Select the exact server assigned to your account (live or demo).</li><li>Enter your account number (Login) and password, then tap <strong>Login</strong>.</li></ol></section><section class="mt5-help-device"><h4>iPhone / iPad</h4><ol><li>Open the MetaTrader 5 app and go to <strong>Settings</strong> in the bottom-right.</li><li>Tap <strong>New Account</strong> (or the arrow / <strong>+</strong> near your account name).</li><li>Search for your broker and select it.</li><li>Select the right server for your account (live or demo).</li><li>Enter your Login ID and password, then tap <strong>Sign In</strong>.</li></ol></section></div></aside></section>`;
 }
 const portfolioEventLabel=type=>({onboarded:'Onboarded',funds_added:'Funds added',offboarded:'Offboarded',profit_withdrawn:'Profit withdrawn'}[type]||type);
