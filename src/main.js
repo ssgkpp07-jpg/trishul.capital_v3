@@ -51,6 +51,7 @@ function Header(){
         <a href="/performance">Performance</a>
         <a href="/about-us">About Us</a>
         <a href="/contact">Contact Us</a>
+        <a href="/contact-card">Contact Card</a>
         <a href="/terms-conditions">Terms &amp; Condition</a>
         <a href="/privacy-policy">Privacy Policy</a>
         <a href="/risk-policy">Risk Policy</a>
@@ -62,7 +63,7 @@ function Header(){
 function Footer(){
   return `<footer>
     <div class="footer-brand"><img class="footer-logo" src="/images/trident.png" alt="Trishul Capital"><h3><span>TRISHUL</span> <b>CAPITAL</b></h3><p>Systematic automated trading solutions with transparent performance tracking.</p></div>
-    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
+    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
     <div><h4>Connect</h4><div id="footerConnect" class="footer-connect"></div></div>
     <div class="footer-meta">
       <div class="copyright">© ${new Date().getFullYear()} Trishul Capital. All rights reserved.</div>
@@ -227,6 +228,21 @@ async function ContactPage(){
  return `<section class="section page-section contact"><div><span class="eyebrow">CONTACT US</span><h2>Let’s build a <span>systematic approach.</span></h2><p>For EA access, account management enquiries or general questions, contact Trishul Capital.</p></div><div class="contact-card">${labels.map(item => `<p class="contact-row"><span class="contact-label"><span class="contact-icon">${item.icon}</span><b>${esc(item.key)}</b></span><br><a href="${esc(item.href)}" target="_blank" rel="noopener">${esc(item.value)}</a></p>`).join('')}</div></section>`;
 }
 
+async function ContactCardPage(){
+ let data,profile;
+ try{[data,profile]=await Promise.all([api('/api/contact-buttons'),api('/api/contact-card/profile')])}catch(error){return `<main class="qr-contact-page"><section class="qr-contact-card qr-contact-error" role="alert"><img src="/images/trident.png" alt=""><h1>Contact links unavailable</h1><p>Please try again shortly.</p></section></main>`}
+ const buttons=Array.isArray(data.items)?data.items:[];
+ const title=profile.title||'Trishul Capital';
+ const logo=profile.logo||'/images/trident.png';
+ const links=buttons.map(item=>{
+  const icon=/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(item.icon)
+   ?`<img src="${esc(item.icon)}" alt="">`
+   :`<span aria-hidden="true">${esc(item.icon)}</span>`;
+  return `<a class="qr-contact-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"><span class="qr-contact-icon">${icon}</span><b>${esc(item.name)}</b><span class="qr-contact-arrow" aria-hidden="true">↗</span></a>`;
+ }).join('');
+ return `<main class="qr-contact-page"><article class="qr-contact-card"><header class="qr-contact-profile"><img class="qr-contact-logo" src="${esc(logo)}" alt="${esc(title)}"><h1>${esc(title)}</h1>${profile.subtitle?`<p>${esc(profile.subtitle)}</p>`:''}${profile.tagline?`<span class="qr-contact-tag">${esc(profile.tagline)}</span>`:''}</header><nav class="qr-contact-links" aria-label="Contact links">${links||'<p class="qr-contact-empty">Contact links will be added soon.</p>'}</nav><p class="qr-contact-location">${esc(title.toUpperCase())} · INDIA</p><p class="qr-contact-note">Trading involves risk. Past performance does not guarantee future results.</p></article></main>`;
+}
+
 function AboutUsPage(){
   return `<section class="section page-section about-page">
     <div class="section-head"><span class="eyebrow">ABOUT US</span><h2>Built by a <span>trader, for traders.</span></h2></div>
@@ -303,14 +319,17 @@ async function render(){
  else if(path==='/portfolio') content=await PortfolioPage();
  else if(path==='/about-us') content=AboutUsPage();
  else if(path==='/contact') content=await ContactPage();
+ else if(path==='/contact-card') content=await ContactCardPage();
  else if(path==='/privacy-policy') content=PrivacyPolicyPage();
  else if(path==='/risk-policy') content=RiskPolicyPage();
  else if(path==='/terms-conditions') content=TermsPage();
  else content=`<section class="section page-section"><div class="section-head"><span class="eyebrow">404</span><h2>Page <span>not found.</span></h2><a class="gold-btn" href="/">Back Home</a></div></section>`;
- document.body.innerHTML=Header()+`<main>${content}</main>`+Footer();
+ const standaloneContactCard=path==='/contact-card';
+ document.body.innerHTML=standaloneContactCard?content:Header()+`<main>${content}</main>`+Footer();
+ document.body.classList.toggle('contact-card-body',standaloneContactCard);
  if(portfolioRefreshTimer)clearInterval(portfolioRefreshTimer);if(path==='/portfolio'){renderPortfolioChartMode(publicPortfolioEvents);portfolioRefreshTimer=setInterval(refreshPublicPortfolio,15000)}
  document.body.classList.remove('menu-open');
- try{
+ if(!standaloneContactCard)try{
    const emailIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.75A2.75 2.75 0 0 1 5.75 4h12.5A2.75 2.75 0 0 1 21 6.75v10.5A2.75 2.75 0 0 1 18.25 20H5.75A2.75 2.75 0 0 1 3 17.25V6.75Zm2.2-.75 6.8 5.76 6.8-5.76H5.2Zm13.05 2.16-6.33 5.36a1 1 0 0 1-1.24 0L5.75 8.16v9.09c0 .41.34.75.75.75h10.99a.75.75 0 0 0 .75-.75V8.16Z" fill="currentColor"/></svg>';
    const whatsappIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2a9.83 9.83 0 0 0-8.36 15.01L2.5 21.5l4.62-1.15A9.96 9.96 0 1 0 12.04 2Zm0 18.13a8.18 8.18 0 0 1-4.17-1.15l-.3-.18-2.74.69.73-2.66-.2-.31A8.17 8.17 0 1 1 12.04 20.13Zm4.48-6.13c-.25-.13-1.48-.73-1.71-.81-.23-.09-.4-.13-.57.13-.17.25-.65.81-.8.98-.15.17-.29.19-.54.06a6.68 6.68 0 0 1-1.96-1.21 7.36 7.36 0 0 1-1.36-1.69c-.14-.25-.02-.38.11-.51.12-.12.25-.29.37-.44.13-.15.17-.25.25-.42.09-.17.04-.31-.02-.44-.06-.13-.57-1.38-.78-1.89-.2-.49-.41-.42-.57-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1s.9 2.44 1.03 2.61c.13.17 1.77 2.7 4.28 3.79.6.26 1.07.41 1.44.53.6.19 1.15.16 1.58.1.48-.07 1.48-.61 1.69-1.2.21-.59.21-1.1.15-1.2-.06-.11-.23-.17-.48-.29Z" fill="currentColor"/></svg>';
    const instagramIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.37 2h9.26A5.38 5.38 0 0 1 22 7.37v9.26A5.38 5.38 0 0 1 16.63 22H7.37A5.38 5.38 0 0 1 2 16.63V7.37A5.38 5.38 0 0 1 7.37 2Zm-.2 1.81a3.35 3.35 0 0 0-3.36 3.36v9.66a3.35 3.35 0 0 0 3.36 3.36h9.66a3.35 3.35 0 0 0 3.36-3.36V7.17a3.35 3.35 0 0 0-3.36-3.36H7.17ZM17.59 5.17a1.21 1.21 0 1 1 0 2.42 1.21 1.21 0 0 1 0-2.42ZM12 6.89A5.11 5.11 0 1 1 6.89 12 5.11 5.11 0 0 1 12 6.89Zm0 1.81A3.3 3.3 0 1 0 15.3 12 3.3 3.3 0 0 0 12 8.7Z" fill="currentColor"/></svg>';
