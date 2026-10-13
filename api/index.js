@@ -22,10 +22,41 @@ const json = (statusCode, body) => {
 const bodyOf = (req) => req.body || {};
 const founderImageKey = 'about_founder_image';
 const maxFounderImageBytes = 3 * 1024 * 1024;
+const contactCardProfileDefaults = {
+  title: 'Trishul Capital',
+  subtitle: 'Account Management & Expert Advisor Services',
+  tagline: 'AUTOMATED · SYSTEMATIC · TRANSPARENT',
+  logo: '/images/trident.png'
+};
+const contactButtonIcons = new Set(['🌐', '◎', '➤', '✉', '☎', 'f', '▶', 'in', '✦']);
+const maxContactButtonIconBytes = 512 * 1024;
 const founderImageTypes = {
   'image/jpeg': buffer => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
   'image/png': buffer => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
   'image/webp': buffer => buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP'
+};
+const isValidContactButtonIcon = icon => {
+  if (typeof icon !== 'string') return false;
+  if (contactButtonIcons.has(icon)) return true;
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(icon);
+  if (!match) return false;
+  const buffer = Buffer.from(match[2], 'base64');
+  return buffer.length > 0 && buffer.length <= maxContactButtonIconBytes
+    && buffer.toString('base64') === match[2] && founderImageTypes[match[1]](buffer);
+};
+const validateContactButton = input => {
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const url = typeof input.url === 'string' ? input.url.trim() : '';
+  if (!name || name.length > 48) return { error: 'Button name must be between 1 and 48 characters' };
+  if (!url || url.length > 2048 || /[\u0000-\u001f]/.test(url)) return { error: 'Enter a valid hyperlink' };
+  const relativeUrl = url.startsWith('/') && !url.startsWith('//') && !url.includes('\\');
+  const absoluteUrl = /^(https?:\/\/|mailto:|tel:)/i.test(url);
+  if (!relativeUrl && !absoluteUrl) return { error: 'Use an https, http, mailto, tel, or same-site path URL' };
+  if (/^https?:\/\//i.test(url)) {
+    try { new URL(url); } catch { return { error: 'Enter a valid hyperlink' }; }
+  }
+  if (!isValidContactButtonIcon(input.icon)) return { error: 'Choose a listed icon or upload a valid PNG, JPEG, or WebP icon (512 KB maximum)' };
+  return { value: { name, url, icon: input.icon } };
 };
 const DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES = {
   onboarded: 'Hello {{client_name}},\n\nWelcome to Trishul Capital. Your account has been onboarded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nFunds recorded: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital',
@@ -113,8 +144,102 @@ export default async function handler(req, res) {
       return res.status(200).json({ items: data });
     }
 
+    if (method === 'GET' && path === '/api/contact-card/profile') {
+      const keys = Object.keys(contactCardProfileDefaults).map(field => `contact_card_${field}`);
+      const { data, error } = await supabase.from('settings').select('key,value').in('key', keys);
+      if (error) throw error;
+      const values = Object.fromEntries((data || []).map(item => [item.key, item.value]));
+      const profile = Object.fromEntries(Object.entries(contactCardProfileDefaults).map(([field, fallback]) => [
+        field, values[`contact_card_${field}`] ?? fallback
+      ]));
+      return res.status(200).json(profile);
+    }
+
+    if (method === 'GET' && path === '/api/contact-buttons') {
+      const { data, error } = await supabase.from('contact_buttons').select('id,name,url,icon').order('position').order('id');
+      if (error) throw error;
+      return res.status(200).json({ items: data || [] });
+    }
+
     if (!authorized(req)) {
       return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (method === 'GET' && path === '/api/admin/contact-card/profile') {
+      const keys = Object.keys(contactCardProfileDefaults).map(field => `contact_card_${field}`);
+      const { data, error } = await supabase.from('settings').select('key,value').in('key', keys);
+      if (error) throw error;
+      const values = Object.fromEntries((data || []).map(item => [item.key, item.value]));
+      const profile = Object.fromEntries(Object.entries(contactCardProfileDefaults).map(([field, fallback]) => [
+        field, values[`contact_card_${field}`] ?? fallback
+      ]));
+      return res.status(200).json(profile);
+    }
+
+    if (method === 'PUT' && path === '/api/admin/contact-card/profile') {
+      const input = bodyOf(req);
+      const title = typeof input.title === 'string' ? input.title.trim() : '';
+      const subtitle = typeof input.subtitle === 'string' ? input.subtitle.trim() : '';
+      const tagline = typeof input.tagline === 'string' ? input.tagline.trim() : '';
+      const logo = input.logo;
+      if (!title || title.length > 80) return res.status(400).json({ message: 'Title must be between 1 and 80 characters' });
+      if (subtitle.length > 160) return res.status(400).json({ message: 'Subtitle must be 160 characters or fewer' });
+      if (tagline.length > 100) return res.status(400).json({ message: 'Tagline must be 100 characters or fewer' });
+      let validLogo = logo === contactCardProfileDefaults.logo;
+      if (typeof logo === 'string') {
+        const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(logo);
+        if (match) {
+          const buffer = Buffer.from(match[2], 'base64');
+          validLogo = buffer.length > 0 && buffer.length <= maxFounderImageBytes
+            && buffer.toString('base64') === match[2] && founderImageTypes[match[1]](buffer);
+        }
+      }
+      if (!validLogo) return res.status(400).json({ message: 'Upload a valid JPEG, PNG, or WebP logo (3 MB maximum)' });
+      const { error } = await supabase.from('settings').upsert([
+        { key: 'contact_card_title', value: title },
+        { key: 'contact_card_subtitle', value: subtitle },
+        { key: 'contact_card_tagline', value: tagline },
+        { key: 'contact_card_logo', value: logo }
+      ]);
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
+    }
+
+    if (method === 'GET' && path === '/api/admin/contact-buttons') {
+      const { data, error } = await supabase.from('contact_buttons').select('id,name,url,icon,position').order('position').order('id');
+      if (error) throw error;
+      return res.status(200).json({ items: data || [] });
+    }
+
+    if (method === 'POST' && path === '/api/admin/contact-buttons') {
+      const checked = validateContactButton(bodyOf(req));
+      if (checked.error) return res.status(400).json({ message: checked.error });
+      const { data: last, error: positionError } = await supabase.from('contact_buttons').select('position').order('position', { ascending: false }).limit(1).maybeSingle();
+      if (positionError) throw positionError;
+      const position = Number.isInteger(last?.position) ? last.position + 1 : 0;
+      const { data, error } = await supabase.from('contact_buttons').insert({ ...checked.value, position }).select('id').single();
+      if (error) throw error;
+      return res.status(201).json({ ok: true, id: data.id });
+    }
+
+    if (method === 'PUT' && path.startsWith('/api/admin/contact-buttons/')) {
+      const id = path.slice('/api/admin/contact-buttons/'.length);
+      if (!/^\d+$/.test(id) || Number(id) < 1) return res.status(400).json({ message: 'Invalid contact button id' });
+      const checked = validateContactButton(bodyOf(req));
+      if (checked.error) return res.status(400).json({ message: checked.error });
+      const { data, error } = await supabase.from('contact_buttons').update(checked.value).eq('id', id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ message: 'Contact button not found' });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (method === 'DELETE' && path.startsWith('/api/admin/contact-buttons/')) {
+      const id = path.slice('/api/admin/contact-buttons/'.length);
+      if (!/^\d+$/.test(id) || Number(id) < 1) return res.status(400).json({ message: 'Invalid contact button id' });
+      const { data, error } = await supabase.from('contact_buttons').delete().eq('id', id).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ message: 'Contact button not found' });
+      return res.status(200).json({ ok: true });
     }
 
     if (method === 'PUT' && path === '/api/admin/about/founder-image') {
