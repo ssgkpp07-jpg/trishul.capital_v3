@@ -18,6 +18,7 @@
     { "source": "/performance", "destination": "/index.html" },
     { "source": "/portfolio", "destination": "/index.html" },
     { "source": "/contact", "destination": "/index.html" },
+    { "source": "/contact-card", "destination": "/index.html" },
     { "source": "/privacy-policy", "destination": "/index.html" },
     { "source": "/risk-policy", "destination": "/index.html" },
     { "source": "/terms-conditions", "destination": "/index.html" }
