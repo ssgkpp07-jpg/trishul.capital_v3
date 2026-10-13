@@ -5,6 +5,8 @@
     { "source": "/api/admin/portfolio/clients/:clientId", "destination": "/api/index?route=/api/admin/portfolio/clients/:clientId" },
     { "source": "/api/about/founder-image", "destination": "/api/index?route=/api/about/founder-image" },
     { "source": "/api/admin/:path*", "destination": "/api/index?route=/api/admin/:path*" },
+    { "source": "/api/contact-card/profile", "destination": "/api/index?route=/api/contact-card/profile" },
+    { "source": "/api/contact-buttons", "destination": "/api/index?route=/api/contact-buttons" },
     { "source": "/api/health", "destination": "/api/index?route=/api/health" },
     { "source": "/api/performance-details", "destination": "/api/index?route=/api/performance-details" },
     { "source": "/api/portfolio", "destination": "/api/index?route=/api/portfolio" },
