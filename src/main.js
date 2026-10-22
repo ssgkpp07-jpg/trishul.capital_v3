@@ -19,6 +19,18 @@ let publicPortfolioEvents=[];
 let portfolioChart;
 let portfolioRefreshTimer;
 let homeRevealObserver;
+let marketTickerRefreshTimer;
+let marketTickerRequestInFlight=false;
+
+const marketInstruments=[
+  {symbol:'XAUUSD',digits:2,dollar:true},
+  {symbol:'XAGUSD',digits:2,dollar:true},
+  {symbol:'BTCUSD',digits:2,dollar:true},
+  {symbol:'NAS100',digits:2,dollar:true},
+  {symbol:'US30',digits:2,dollar:true},
+  {symbol:'EURUSD',digits:4,dollar:false},
+  {symbol:'GBPUSD',digits:4,dollar:false}
+];
 
 function Header(){
   const path = location.pathname.replace(/\/$/,'') || '/';
@@ -73,8 +85,61 @@ function Footer(){
   </footer>`;
 }
 
+function MarketTicker(){
+  const quotes=[...marketInstruments,...marketInstruments];
+  return `<section class="ticker market-ticker" aria-label="Indicative market prices">
+    <div class="ticker-track" aria-live="off">${quotes.map((instrument,index)=>`<div class="ticker-quote" data-market-symbol="${instrument.symbol}"${index>=marketInstruments.length?' aria-hidden="true"':''}><span>${instrument.symbol}</span><strong data-market-price="${instrument.symbol}">Loading…</strong><small>USD</small></div>`).join('')}</div>
+    <p class="ticker-market-note" data-market-status>Indicative market prices · provider updates may be delayed · refreshing every 30 seconds</p>
+  </section>`;
+}
+
+function formatMarketPrice(instrument,price){
+  const formatted=new Intl.NumberFormat('en-US',{minimumFractionDigits:instrument.digits,maximumFractionDigits:instrument.digits}).format(price);
+  return instrument.dollar?`$${formatted}`:formatted;
+}
+
+async function refreshMarketTicker(){
+  const ticker=document.querySelector('.market-ticker');
+  if(!ticker||marketTickerRequestInFlight)return;
+  marketTickerRequestInFlight=true;
+  try{
+    const result=await api('/api/market-quotes');
+    if(!ticker.isConnected)return;
+    if(!Array.isArray(result.quotes))throw new Error('Market quote response is invalid');
+    const quotesBySymbol=new Map(result.quotes.map(quote=>[quote.symbol,quote]));
+    let unavailable=0;
+    marketInstruments.forEach(instrument=>{
+      const quote=quotesBySymbol.get(instrument.symbol);
+      const price=quote?.price;
+      const available=quote?.status==='ok'&&typeof price==='number'&&Number.isFinite(price);
+      if(!available)unavailable+=1;
+      ticker.querySelectorAll(`[data-market-price="${instrument.symbol}"]`).forEach(element=>{
+        element.textContent=available?formatMarketPrice(instrument,price):'Unavailable';
+      });
+    });
+    const checkedAt=new Date(result.retrievedAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    ticker.querySelector('[data-market-status]').textContent=unavailable
+      ?`${unavailable} market quote${unavailable===1?'':'s'} unavailable · last checked ${checkedAt} · provider updates may be delayed`
+      :`Indicative market prices · last checked ${checkedAt} · provider updates may be delayed`;
+  }catch(error){
+    console.error('Unable to refresh homepage market quotes',error);
+    if(ticker.isConnected){
+      ticker.querySelectorAll('[data-market-price]').forEach(element=>{
+        if(element.textContent==='Loading…')element.textContent='Unavailable';
+      });
+      ticker.querySelector('[data-market-status]').textContent='Market quotes unavailable · retrying';
+    }
+  }finally{
+    marketTickerRequestInFlight=false;
+  }
+}
+
 function Hero(){
   return `<section class="hero">
+    <svg class="hero-trend-watermark" viewBox="0 0 1200 620" preserveAspectRatio="none" aria-hidden="true">
+      <path class="hero-trend-base" d="M0 610 102 610 112 500 126 528 140 470 153 520 165 530 176 478 188 512 191 350 205 450 214 421 226 502 239 465 255 479 270 532 281 580 293 550 302 495 315 490 326 401 338 380 349 430 365 405 382 365 394 380 411 410 420 440 435 408 449 470 462 365 475 424 486 380 501 443 515 365 529 391 541 479 553 425 566 450 579 435 594 365 606 376 616 335 628 355 640 210 652 260 668 258 680 309 694 330 705 352 718 380 730 392 742 388 753 420 761 360 774 330 784 205 800 290 812 144 824 201 837 216 849 220 864 242 878 220 886 263 898 180 909 106 916 138 927 110 938 166 946 133 958 76 968 150 979 195 991 151 1002 135 1015 185 1025 160 1037 220 1048 170 1063 205 1075 210 1082 288 1092 280 1100 345 1108 98 1118 25 1127 97 1137 150 1146 206 1156 230 1164 280 1172 270 1183 301 1192 355 1200 190"></path>
+      <path class="hero-trend-flow" pathLength="1000" d="M0 610 102 610 112 500 126 528 140 470 153 520 165 530 176 478 188 512 191 350 205 450 214 421 226 502 239 465 255 479 270 532 281 580 293 550 302 495 315 490 326 401 338 380 349 430 365 405 382 365 394 380 411 410 420 440 435 408 449 470 462 365 475 424 486 380 501 443 515 365 529 391 541 479 553 425 566 450 579 435 594 365 606 376 616 335 628 355 640 210 652 260 668 258 680 309 694 330 705 352 718 380 730 392 742 388 753 420 761 360 774 330 784 205 800 290 812 144 824 201 837 216 849 220 864 242 878 220 886 263 898 180 909 106 916 138 927 110 938 166 946 133 958 76 968 150 979 195 991 151 1002 135 1015 185 1025 160 1037 220 1048 170 1063 205 1075 210 1082 288 1092 280 1100 345 1108 98 1118 25 1127 97 1137 150 1146 206 1156 230 1164 280 1172 270 1183 301 1192 355 1200 190"></path>
+    </svg>
     <div class="hero-copy scroll-reveal reveal-left">
       <span class="eyebrow">AUTOMATED • SYSTEMATIC • TRANSPARENT</span>
       <h1>Let Trishul Capital Trade <br><span>While You Live Your Life.</span></h1>
@@ -92,12 +157,7 @@ function Hero(){
     </div>
     <div class="hero-art scroll-reveal reveal-right"><div class="halo"></div><div class="hero-visuals"><img class="hero-visual hero-trident" src="/images/trident-gold.png" alt="Trishul Capital trident logo"></div></div>
   </section>
-  <section class="ticker" aria-label="Trishul Capital highlights">
-    <div class="ticker-track">
-      <div>TRISHUL CAPITAL</div><div>ACCOUNT MANAGEMENT</div><div>VPS DEPLOYMENT</div><div>LIVE PERFORMANCE TRACKING</div><div>MT5 EXPERT ADVISORS</div><div>XAUUSD • NASDAQ 100 • BTCUSD</div>
-      <div>TRISHUL CAPITAL</div><div>ACCOUNT MANAGEMENT</div><div>VPS DEPLOYMENT</div><div>LIVE PERFORMANCE TRACKING</div><div>MT5 EXPERT ADVISORS</div><div>XAUUSD • NASDAQ 100 • BTCUSD</div>
-    </div>
-  </section>`;
+  ${MarketTicker()}`;
 }
 
 function SystemSection(){
@@ -363,9 +423,15 @@ async function render(){
  const standaloneContactCard=path==='/contact-card';
  homeRevealObserver?.disconnect();
  homeRevealObserver=null;
+ if(marketTickerRefreshTimer)clearInterval(marketTickerRefreshTimer);
+ marketTickerRefreshTimer=null;
  document.body.innerHTML=standaloneContactCard?content:Header()+`<main>${content}</main>`+Footer();
  document.body.classList.toggle('contact-card-body',standaloneContactCard);
- if(path==='/')setupHomeScrollReveal();
+ if(path==='/'){
+   setupHomeScrollReveal();
+   refreshMarketTicker();
+   marketTickerRefreshTimer=setInterval(refreshMarketTicker,30000);
+ }
  if(portfolioRefreshTimer)clearInterval(portfolioRefreshTimer);if(path==='/portfolio'){renderPortfolioChartMode(publicPortfolioEvents);portfolioRefreshTimer=setInterval(refreshPublicPortfolio,15000)}
  document.body.classList.remove('menu-open');
  if(!standaloneContactCard)try{
