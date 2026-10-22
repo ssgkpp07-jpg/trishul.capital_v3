@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
+import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
 const getSupabase = () => {
@@ -101,6 +102,11 @@ export default async function handler(req, res) {
   try {
     if (method === 'GET' && path === '/api/health') {
       return res.status(200).json({ ok: true, service: 'trishul-capital-api' });
+    }
+
+    if (method === 'GET' && path === '/api/market-quotes') {
+      const quotes = await getMarketQuotes();
+      return res.status(200).json(quotes);
     }
 
     if (method === 'GET' && path === '/api/about/founder-image') {
