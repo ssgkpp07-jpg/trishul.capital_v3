@@ -77,13 +77,27 @@ export function summarizePortfolioMonths(events) {
     const date = new Date(event.created_at);
     if (Number.isNaN(date.getTime())) continue;
     const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-    if (!months.has(key)) months.set(key, { key, label: new Date(`${key}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' }), onboarded: new Set(), offboarded: new Set(), fundsAdded: 0, fundsWithdrawn: 0 });
+    if (!months.has(key)) months.set(key, {
+      key,
+      label: new Date(`${key}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+      onboarded: new Set(),
+      offboarded: new Set(),
+      onboardedAccounts: new Set(),
+      offboardedAccounts: new Set(),
+      fundsAdded: 0,
+      fundsWithdrawn: 0
+    });
     const month = months.get(key);
     const client = event.client_id ? `id:${event.client_id}` : `name:${String(event.client_name || '').trim().toLowerCase()}`;
+    const account = String(event.account_number || '').trim();
     const amount = Number(event.amount) || 0;
-    if (event.event_type === 'onboarded') month.onboarded.add(client);
+    if (event.event_type === 'onboarded') {
+      month.onboarded.add(client);
+      if (account) month.onboardedAccounts.add(account);
+    }
     if (event.event_type === 'offboarded') {
       month.offboarded.add(client);
+      if (account) month.offboardedAccounts.add(account);
       month.fundsWithdrawn += amount;
     }
     if (event.event_type === 'onboarded' || event.event_type === 'funds_added') month.fundsAdded += amount;
@@ -93,6 +107,8 @@ export function summarizePortfolioMonths(events) {
     label: month.label,
     onboardedCount: month.onboarded.size,
     offboardedCount: month.offboarded.size,
+    onboardedAccountCount: month.onboardedAccounts.size,
+    offboardedAccountCount: month.offboardedAccounts.size,
     fundsAdded: roundMoney(month.fundsAdded),
     fundsWithdrawn: roundMoney(month.fundsWithdrawn)
   }));
