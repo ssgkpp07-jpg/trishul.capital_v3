@@ -18,6 +18,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 let publicPortfolioEvents=[];
 let portfolioChart;
 let portfolioRefreshTimer;
+let homeRevealObserver;
 
 function Header(){
   const path = location.pathname.replace(/\/$/,'') || '/';
@@ -74,7 +75,7 @@ function Footer(){
 
 function Hero(){
   return `<section class="hero">
-    <div class="hero-copy">
+    <div class="hero-copy scroll-reveal reveal-left">
       <span class="eyebrow">AUTOMATED • SYSTEMATIC • TRANSPARENT</span>
       <h1>Let Trishul Capital Trade <br><span>While You Live Your Life.</span></h1>
       <p className="mt-6 text-lg leading-relaxed text-gray-400">
@@ -89,7 +90,7 @@ function Hero(){
           </p>
       <div class="actions"><a class="gold-btn" href="/packages">Explore Packages</a><a class="outline-btn" href="/performance">View Performance</a></div>
     </div>
-    <div class="hero-art"><div class="halo"></div><div class="hero-visuals"><img class="hero-visual hero-trident" src="/images/trident-gold.png" alt="Trishul Capital trident logo"></div></div>
+    <div class="hero-art scroll-reveal reveal-right"><div class="halo"></div><div class="hero-visuals"><img class="hero-visual hero-trident" src="/images/trident-gold.png" alt="Trishul Capital trident logo"></div></div>
   </section>
   <section class="ticker" aria-label="Trishul Capital highlights">
     <div class="ticker-track">
@@ -101,11 +102,11 @@ function Hero(){
 
 function SystemSection(){
   return `<section class="section dark system-section"><div class="split">
-    <div class="section-copy"><span class="eyebrow">THE SYSTEM</span><h2>Built Around <span>Gold Trading</span></h2>
+    <div class="section-copy scroll-reveal reveal-left"><span class="eyebrow">THE SYSTEM</span><h2>Built Around <span>Gold Trading</span></h2>
       <p><strong>Trishul Capital</strong> provides an automated Forex trading and account-management solution powered by a custom-built <strong>Expert Advisor (EA) for MetaTrader 5</strong>, developed from over <strong>5 years of trading experience</strong>. The system is designed to automate trade execution while incorporating predefined <strong>Stop Loss, Take Profit, and smart trailing-stop logic</strong> for systematic risk and profit management.</p>
-      <div class="feature-pair"><div class="feature-box"><span>⚙️</span><b>Automated Execution</b></div><div class="feature-box"><span>☁️</span><b>VPS Deployment</b></div></div>
+      <div class="feature-pair"><div class="feature-box scroll-reveal reveal-up"><span>⚙️</span><b>Automated Execution</b></div><div class="feature-box scroll-reveal reveal-up reveal-delay-1"><span>☁️</span><b>VPS Deployment</b></div></div>
     </div>
-    <div class="image-frame"><img src="/images/peacock-3.png" alt="Trishul Capital peacock"></div>
+    <div class="image-frame scroll-reveal reveal-right"><img src="/images/peacock-3.png" alt="Trishul Capital peacock"></div>
   </div></section>`;
 }
 
@@ -116,7 +117,7 @@ function StepsSection(){
     ['03','Installation & VPS Setup','We activate your EA in your Trading Account and prepare your trading environment.'],
     ['04','Let Trishul Capital Trade','Once activated, Trishul Capital EA automatically trades XAUUSD/Triple Combo while you monitor everything from your MT5 Account on your Mobile Phone.']
   ];
-  return `<section class="section dark steps-section"><div class="section-head centered"><h2>Start Trading Gold In <span>4 Simple Steps</span></h2></div><div class="split steps-wrap"><div class="image-frame large"><img src="/images/peacock-2.png" alt="Trishul Capital peacock"></div><div class="steps-grid">${steps.map(s=>`<article class="step-card"><span class="step-num">${s[0]}</span><h3>${s[1]}</h3><p>${s[2]}</p></article>`).join('')}</div></div></section>`;
+  return `<section class="section dark steps-section"><div class="section-head centered scroll-reveal reveal-up"><h2>Start Trading Gold In <span>4 Simple Steps</span></h2></div><div class="split steps-wrap"><div class="image-frame large scroll-reveal reveal-left"><img src="/images/peacock-2.png" alt="Trishul Capital peacock"></div><div class="steps-grid">${steps.map((s,index)=>`<article class="step-card scroll-reveal reveal-up reveal-delay-${Math.min(index,2)}"><span class="step-num">${s[0]}</span><h3>${s[1]}</h3><p>${s[2]}</p></article>`).join('')}</div></div></section>`;
 }
 
 function WhySection(){
@@ -128,7 +129,7 @@ function WhySection(){
     ['🔑','Account Management','We Manage trading accounts, downloads, and EA activation requests through your dedicated VPS.'],
     ['🎧','Dedicated Support','Access technical assistance, account support, and onboarding help whenever needed.']
   ];
-  return `<section class="section dark why-section"><div class="section-head centered"><h2>Why Traders Choose <span>Trishul Capital</span></h2><p>A complete automated trading ecosystem built for consistent, disciplined performance in the gold market.</p></div><div class="why-grid">${items.map(x=>`<article class="why-card"><div class="icon-box">${x[0]}</div><h3>${x[1]}</h3><p>${x[2]}</p></article>`).join('')}</div></section>`;
+  return `<section class="section dark why-section"><div class="section-head centered scroll-reveal reveal-up"><h2>Why Traders Choose <span>Trishul Capital</span></h2><p>A complete automated trading ecosystem built for consistent, disciplined performance in the gold market.</p></div><div class="why-grid">${items.map((x,index)=>`<article class="why-card scroll-reveal reveal-up reveal-delay-${index%3}"><div class="icon-box">${x[0]}</div><h3>${x[1]}</h3><p>${x[2]}</p></article>`).join('')}</div></section>`;
 }
 
 function StrategySection(){
@@ -137,7 +138,7 @@ function StrategySection(){
     ['02','SMART RISK ENGINE','Adaptive lot sizing and drawdown protection built into every trade.'],
     ['03','BACKTESTED RESULTS','Over a decade of historical data validating consistent, repeatable performance.']
   ];
-  return `<section class="section dark strategy-section"><div class="section-head centered compact"><span class="eyebrow">TRISHUL CAPITAL EA — TRADING STRATEGY</span></div><div class="strategy-grid">${items.map(x=>`<article class="strategy-card"><span class="step-num">${x[0]}</span><h3>${x[1]}</h3><p>${x[2]}</p></article>`).join('')}</div></section>`;
+  return `<section class="section dark strategy-section"><div class="section-head centered compact scroll-reveal reveal-up"><span class="eyebrow">TRISHUL CAPITAL EA — TRADING STRATEGY</span></div><div class="strategy-grid">${items.map((x,index)=>`<article class="strategy-card scroll-reveal reveal-up reveal-delay-${index}"><span class="step-num">${x[0]}</span><h3>${x[1]}</h3><p>${x[2]}</p></article>`).join('')}</div></section>`;
 }
 
 const packageData = [
@@ -325,7 +326,24 @@ function TermsPage(){
 }
 
 async function Home(){
- return `${Hero()}${SystemSection()}${StepsSection()}${WhySection()}${StrategySection()}<section class="section home-cta"><div class="cta-card"><span class="eyebrow">READY TO BEGIN?</span><h2>Choose your <span>automated system.</span></h2><p>Explore the free Gold EA and Combo EA packages or view live account performance.</p><div class="actions"><a class="gold-btn" href="/packages">View Packages</a><a class="outline-btn" href="/performance">View Performance</a></div></div></section>`;
+ return `${Hero()}${SystemSection()}${StepsSection()}${WhySection()}${StrategySection()}<section class="section home-cta"><div class="cta-card scroll-reveal reveal-up"><span class="eyebrow">READY TO BEGIN?</span><h2>Choose your <span>automated system.</span></h2><p>Explore the free Gold EA and Combo EA packages or view live account performance.</p><div class="actions"><a class="gold-btn" href="/packages">View Packages</a><a class="outline-btn" href="/performance">View Performance</a></div></div></section>`;
+}
+
+function setupHomeScrollReveal(){
+ homeRevealObserver?.disconnect();
+ homeRevealObserver=null;
+ const elements=document.querySelectorAll('.scroll-reveal');
+ if(!elements.length)return;
+ if(window.matchMedia('(prefers-reduced-motion: reduce)').matches||!('IntersectionObserver' in window)){
+   elements.forEach(element=>element.classList.add('is-visible'));
+   return;
+ }
+ homeRevealObserver=new IntersectionObserver(entries=>{
+   entries.forEach(entry=>{
+     entry.target.classList.toggle('is-visible',entry.isIntersecting);
+   });
+ },{threshold:.1,rootMargin:'0px 0px -6% 0px'});
+ elements.forEach(element=>homeRevealObserver.observe(element));
 }
 
 async function render(){
@@ -343,8 +361,11 @@ async function render(){
  else if(path==='/terms-conditions') content=TermsPage();
  else content=`<section class="section page-section"><div class="section-head"><span class="eyebrow">404</span><h2>Page <span>not found.</span></h2><a class="gold-btn" href="/">Back Home</a></div></section>`;
  const standaloneContactCard=path==='/contact-card';
+ homeRevealObserver?.disconnect();
+ homeRevealObserver=null;
  document.body.innerHTML=standaloneContactCard?content:Header()+`<main>${content}</main>`+Footer();
  document.body.classList.toggle('contact-card-body',standaloneContactCard);
+ if(path==='/')setupHomeScrollReveal();
  if(portfolioRefreshTimer)clearInterval(portfolioRefreshTimer);if(path==='/portfolio'){renderPortfolioChartMode(publicPortfolioEvents);portfolioRefreshTimer=setInterval(refreshPublicPortfolio,15000)}
  document.body.classList.remove('menu-open');
  if(!standaloneContactCard)try{
