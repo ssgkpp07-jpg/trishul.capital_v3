@@ -8,6 +8,7 @@
     { "source": "/api/contact-card/profile", "destination": "/api/index?route=/api/contact-card/profile" },
     { "source": "/api/contact-buttons", "destination": "/api/index?route=/api/contact-buttons" },
     { "source": "/api/health", "destination": "/api/index?route=/api/health" },
+    { "source": "/api/market-quotes", "destination": "/api/index?route=/api/market-quotes" },
     { "source": "/api/performance-details", "destination": "/api/index?route=/api/performance-details" },
     { "source": "/api/portfolio", "destination": "/api/index?route=/api/portfolio" },
     { "source": "/api/settings/contact", "destination": "/api/index?route=/api/settings/contact" },
