@@ -10,6 +10,8 @@
     body{margin:0;padding:30px;background:var(--bg);color:#f4f0e6;font:14px Arial,sans-serif}
     main{max-width:1100px;margin:auto;padding:30px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
     .top,.toolbar,.history-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}
+    .report-brand{display:flex;align-items:center;gap:12px;margin-left:auto;color:var(--gold2);font-size:14px;font-weight:bold;letter-spacing:1.4px;white-space:nowrap}
+    .report-brand img{width:58px;height:58px;object-fit:contain}
     .eyebrow{color:var(--gold);font-size:11px;letter-spacing:1.5px;text-transform:uppercase}
     h1{margin:8px 0;color:var(--gold2);font:32px Georgia,serif}
     h2{margin:0;font:22px Georgia,serif}
@@ -63,6 +65,7 @@
       h1,.stat strong,th{color:#111!important}
       .eyebrow,.muted,.subtle,.stat span{color:#444!important}
       .summary{break-inside:avoid}
+      .report-brand{color:#222}
       .stat,.table-wrap{border-color:#aaa;background:#fff}
       th,td{border-color:#bbb}
       tbody tr:hover{background:transparent}
@@ -83,6 +86,7 @@
         <button type="button" onclick="window.print()">Print / Save PDF</button>
         <button type="button" id="openShareDialog">Share PDF + message</button>
       </div>
+      <div class="report-brand"><img src="/images/trident.png" alt="Trishul Capital logo"><span>TRISHUL CAPITAL</span></div>
     </header>
     <hr class="rule">
     <section class="summary" aria-label="Client transaction summary">
@@ -184,6 +188,7 @@
 
     function buildPdfSource() {
       const report = $('clientReport').cloneNode(true);
+      report.querySelectorAll('.pdf-exclude').forEach(element => element.remove());
       report.querySelector('#accountHistories').innerHTML = renderHistoryMarkup(accountSummaries);
       return report;
     }
