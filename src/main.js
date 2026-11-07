@@ -28,8 +28,8 @@ const marketInstruments=[
   {symbol:'BTCUSD',digits:2,dollar:true},
   {symbol:'NAS100',digits:2,dollar:true},
   {symbol:'US30',digits:2,dollar:true},
-  {symbol:'EURUSD',digits:4,dollar:false},
-  {symbol:'GBPUSD',digits:4,dollar:false}
+  {symbol:'EURUSD',digits:4,dollar:true},
+  {symbol:'GBPUSD',digits:4,dollar:true}
 ];
 
 function Header(){
