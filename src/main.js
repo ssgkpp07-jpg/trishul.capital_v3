@@ -37,7 +37,7 @@ function Header(){
   const active = p => path === p ? 'active' : '';
   return `
     <header class="header">
-      <a class="brand" href="/"><img src="/images/trident.png" alt="Trishul Capital"><span>TRISHUL <b>CAPITAL</b></span></a>
+      <a class="brand" href="/"><picture class="brand-mark"><source media="(max-width: 700px)" srcset="/images/trident-gold.png"><img src="/images/trident.png" alt="Trishul Capital"></picture><span>TRISHUL <b>CAPITAL</b></span></a>
       <nav class="desktop-nav">
         <a class="${active('/')}" href="/">Home</a>
         <a class="${active('/portfolio')}" href="/portfolio">Portfolio</a>
@@ -54,7 +54,7 @@ function Header(){
     <div class="side-menu-backdrop"></div>
     <aside class="side-menu" aria-label="Mobile navigation">
       <div class="side-menu-head">
-        <div class="brand small-brand"><img src="/images/trident.png" alt="Trishul Capital"><span>TRISHUL <b>CAPITAL</b></span></div>
+        <div class="brand small-brand"><picture class="brand-mark"><source media="(max-width: 700px)" srcset="/images/trident-gold.png"><img src="/images/trident.png" alt="Trishul Capital"></picture><span>TRISHUL <b>CAPITAL</b></span></div>
         <button class="menu-close" type="button" aria-label="Close menu">×</button>
       </div>
       <nav class="side-menu-nav">
