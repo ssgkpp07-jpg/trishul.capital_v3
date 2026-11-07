@@ -85,7 +85,8 @@ export function summarizePortfolioMonths(events) {
       onboardedAccounts: new Set(),
       offboardedAccounts: new Set(),
       fundsAdded: 0,
-      fundsWithdrawn: 0
+      fundsWithdrawn: 0,
+      profitsWithdrawn: 0
     });
     const month = months.get(key);
     const client = event.client_id ? `id:${event.client_id}` : `name:${String(event.client_name || '').trim().toLowerCase()}`;
@@ -100,6 +101,7 @@ export function summarizePortfolioMonths(events) {
       if (account) month.offboardedAccounts.add(account);
       month.fundsWithdrawn += amount;
     }
+    if (event.event_type === 'profit_withdrawn') month.profitsWithdrawn += amount;
     if (event.event_type === 'onboarded' || event.event_type === 'funds_added') month.fundsAdded += amount;
   }
   return [...months.values()].sort((left, right) => left.key.localeCompare(right.key)).map(month => ({
@@ -110,7 +112,8 @@ export function summarizePortfolioMonths(events) {
     onboardedAccountCount: month.onboardedAccounts.size,
     offboardedAccountCount: month.offboardedAccounts.size,
     fundsAdded: roundMoney(month.fundsAdded),
-    fundsWithdrawn: roundMoney(month.fundsWithdrawn)
+    fundsWithdrawn: roundMoney(month.fundsWithdrawn),
+    profitsWithdrawn: roundMoney(month.profitsWithdrawn)
   }));
 }
 
