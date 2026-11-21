@@ -203,10 +203,12 @@ begin
 end;
 $$;
 
+drop function if exists update_portfolio_account(text, text, text, boolean);
 create or replace function update_portfolio_account(
   p_client_id text,
   p_account_number text,
   p_new_account_number text,
+  p_onboarded_date date,
   p_server_billing_enabled boolean
 )
 returns jsonb
@@ -265,10 +267,7 @@ begin
   end if;
   update portfolio_events
   set server_billing_enabled = p_server_billing_enabled,
-      server_billing_onboarding_date = case
-        when p_server_billing_enabled then coalesce(server_billing_onboarding_date, created_at::date)
-        else null
-      end
+      server_billing_onboarding_date = p_onboarded_date
   where id = onboarding_id;
 
   if p_new_account_number <> p_account_number then
@@ -301,9 +300,9 @@ end;
 $$;
 
 revoke all on function next_billing_invoice_sequence(integer, integer) from public;
-revoke all on function update_portfolio_account(text, text, text, boolean) from public;
+revoke all on function update_portfolio_account(text, text, text, date, boolean) from public;
 grant execute on function next_billing_invoice_sequence(integer, integer) to service_role;
-grant execute on function update_portfolio_account(text, text, text, boolean) to service_role;
+grant execute on function update_portfolio_account(text, text, text, date, boolean) to service_role;
 
 insert into settings(key,value) values
   ('contact_email','contact@trishulcapital.com'),
