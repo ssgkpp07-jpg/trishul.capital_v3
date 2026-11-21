@@ -1,4 +1,4 @@
-import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {buildServerBillingSchedule,createBillingInvoice,createBillingPdf,formatBillingInvoiceNumber,getBillingPeriodDates,getDefaultBillingSettings,normalizeBillingSettings,replaceInvoiceAccountNumber} from '../billing.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
+import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {buildServerBillingSchedule,createBillingInvoice,createBillingPdf,formatBillingInvoiceNumber,getBillingPeriodDates,getDefaultBillingSettings,getNextBillingInvoiceSequence,normalizeBillingSettings,replaceInvoiceAccountNumber} from '../billing.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
 const databasePath=process.env.DATABASE_PATH||'trishul.db',databaseDirectory=path.dirname(databasePath);if(databaseDirectory!=='.')fs.mkdirSync(databaseDirectory,{recursive:true});
 const app=express(),db=new Database(databasePath),allowedOrigins=(process.env.FRONTEND_URL||'').split(',').map(x=>x.trim().replace(/\/$/,'')).filter(Boolean);app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);cb(new Error('Origin not allowed by CORS'))}}));app.use(express.json({limit:'8mb'}));app.use(express.static('dist'));app.use('/assets',express.static('public'));fs.mkdirSync('public/uploads',{recursive:true});
 db.exec(`CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,name TEXT NOT NULL,package_name TEXT,myfxbook_url TEXT NOT NULL,active INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,last_sync TEXT);CREATE TABLE IF NOT EXISTS snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,captured_at TEXT DEFAULT CURRENT_TIMESTAMP,gain REAL,daily REAL,monthly REAL,yearly REAL,drawdown REAL,balance REAL,equity REAL,profit REAL,pips REAL,trades INTEGER,win_rate REAL,profit_factor REAL,FOREIGN KEY(account_id) REFERENCES accounts(id));CREATE TABLE IF NOT EXISTS socials(id INTEGER PRIMARY KEY AUTOINCREMENT,platform TEXT,url TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE IF NOT EXISTS pages(id INTEGER PRIMARY KEY AUTOINCREMENT,slug TEXT UNIQUE,title TEXT,body TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS portfolio_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL CHECK(event_type IN ('onboarded','offboarded','profit_withdrawn')),client_name TEXT NOT NULL,account_number TEXT NOT NULL,amount REAL NOT NULL CHECK(amount>0),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
@@ -20,6 +20,7 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS billing_invoices_standard_period_idx 
 const serverCycleIndexColumns=db.prepare("PRAGMA index_info('billing_invoices_server_cycle_idx')").all().map(column=>column.name);
 if(serverCycleIndexColumns.join(',')!=='client_id,server_billing_due_date,account_number')db.exec('DROP INDEX IF EXISTS billing_invoices_server_cycle_idx;CREATE UNIQUE INDEX billing_invoices_server_cycle_idx ON billing_invoices(client_id,server_billing_due_date,account_number) WHERE billing_type=\'server_fee\' AND deleted_at IS NULL');
 db.exec('CREATE TABLE IF NOT EXISTS billing_invoice_sequences(issue_year INTEGER NOT NULL,issue_month INTEGER NOT NULL,last_sequence INTEGER NOT NULL CHECK(last_sequence>0),PRIMARY KEY(issue_year,issue_month))');
+db.exec('CREATE TABLE IF NOT EXISTS billing_invoice_reusable_sequences(issue_year INTEGER NOT NULL,issue_month INTEGER NOT NULL,sequence INTEGER NOT NULL CHECK(sequence>0),PRIMARY KEY(issue_year,issue_month,sequence))');
 if(!db.prepare('PRAGMA table_info(portfolio_clients)').all().some(column=>column.name==='whatsapp_number'))db.exec("ALTER TABLE portfolio_clients ADD COLUMN whatsapp_number TEXT NOT NULL DEFAULT ''");
 const portfolioSchema=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_events'").get()?.sql||'';
 if(!portfolioSchema.includes("'funds_added'")){
@@ -292,16 +293,18 @@ const saveBillingInvoice=invoice=>{
  if(!Number.isInteger(year)||!Number.isInteger(month)||month<1||month>12)throw new Error('Invoice issue date is invalid.');
  return db.transaction(()=>{
   const existing=db.prepare('SELECT last_sequence FROM billing_invoice_sequences WHERE issue_year=? AND issue_month=?').get(year,month);
-  let sequence=Number(existing?.last_sequence||0);
+  let lastSequence=Number(existing?.last_sequence||0);
   if(!existing){
    const pattern=/^INV-TC-(\d+)\/(\d{2})\/(\d{4})$/;
    for(const row of db.prepare('SELECT invoice_number FROM billing_invoices').all()){
     const match=pattern.exec(row.invoice_number);
-    if(match&&Number(match[2])===month&&Number(match[3])===year)sequence=Math.max(sequence,Number(match[1]));
+    if(match&&Number(match[2])===month&&Number(match[3])===year)lastSequence=Math.max(lastSequence,Number(match[1]));
    }
   }
-  sequence+=1;
-  db.prepare('INSERT INTO billing_invoice_sequences(issue_year,issue_month,last_sequence) VALUES(?,?,?) ON CONFLICT(issue_year,issue_month) DO UPDATE SET last_sequence=excluded.last_sequence').run(year,month,sequence);
+  const reusable=db.prepare('SELECT sequence FROM billing_invoice_reusable_sequences WHERE issue_year=? AND issue_month=? ORDER BY sequence LIMIT 1').get(year,month);
+  const sequence=getNextBillingInvoiceSequence(lastSequence,reusable?.sequence);
+  if(reusable)db.prepare('DELETE FROM billing_invoice_reusable_sequences WHERE issue_year=? AND issue_month=? AND sequence=?').run(year,month,sequence);
+  db.prepare('INSERT INTO billing_invoice_sequences(issue_year,issue_month,last_sequence) VALUES(?,?,?) ON CONFLICT(issue_year,issue_month) DO UPDATE SET last_sequence=MAX(billing_invoice_sequences.last_sequence,excluded.last_sequence)').run(year,month,Math.max(lastSequence,sequence));
   invoice.invoice_number=formatBillingInvoiceNumber(year,month,sequence);
   return insertBillingInvoice.run({...invoice,custom_line_items:JSON.stringify(invoice.custom_line_items),invoice_settings:JSON.stringify(invoice.invoice_settings)});
  })();
@@ -405,10 +408,18 @@ app.delete('/api/admin/billing/invoices/:id',auth,(req,res)=>{
 app.delete('/api/admin/billing/invoices/:id/permanent',auth,(req,res)=>{
  const id=Number(req.params.id);
  if(!Number.isInteger(id)||id<=0)return res.status(400).json({message:'Invalid invoice ID.'});
- const invoice=db.prepare('SELECT deleted_at FROM billing_invoices WHERE id=?').get(id);
- if(!invoice)return res.status(404).json({message:'Invoice not found.'});
- if(!invoice.deleted_at)return res.status(409).json({message:'Delete the invoice first before permanent deletion.'});
- db.prepare('DELETE FROM billing_invoices WHERE id=?').run(id);
+ const permanentlyDelete=db.transaction(()=>{
+  const invoice=db.prepare('SELECT invoice_number,deleted_at FROM billing_invoices WHERE id=?').get(id);
+  if(!invoice)return {status:'missing'};
+  if(!invoice.deleted_at)return {status:'active'};
+  const match=/^INV-TC-(\d+)\/(\d{2})\/(\d{4})$/.exec(invoice.invoice_number);
+  if(match)db.prepare('INSERT OR IGNORE INTO billing_invoice_reusable_sequences(issue_year,issue_month,sequence) VALUES(?,?,?)').run(Number(match[3]),Number(match[2]),Number(match[1]));
+  db.prepare('DELETE FROM billing_invoices WHERE id=?').run(id);
+  return {status:'deleted'};
+ });
+ const result=permanentlyDelete();
+ if(result.status==='missing')return res.status(404).json({message:'Invoice not found.'});
+ if(result.status==='active')return res.status(409).json({message:'Delete the invoice first before permanent deletion.'});
  return res.json({ok:true});
 });
 app.put('/api/admin/portfolio/clients/:clientId',auth,(req,res)=>{
