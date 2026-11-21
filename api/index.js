@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
-import { createBillingInvoice, createBillingPdf, getBillingPeriodDates, sendBillingInvoiceEmail } from '../billing.js';
+import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, createServerBillingInvoice, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
@@ -89,20 +89,10 @@ const getPortfolio = async () => {
   if (error) throw error;
   return summarizePortfolio(data || []);
 };
-const deliverSupabaseBillingInvoice = async invoice => {
-  try {
-    const pdf = await createBillingPdf(invoice);
-    await sendBillingInvoiceEmail(invoice, pdf);
-  } catch (error) {
-    const { data, error: updateError } = await supabase.from('billing_invoices')
-      .update({ status: 'email_failed', emailed_at: null }).eq('id', invoice.id).select('*').single();
-    if (updateError) throw new Error(`Email delivery failed and the invoice status could not be updated: ${updateError.message}`);
-    return { invoice: data, error };
-  }
-  const { data, error } = await supabase.from('billing_invoices')
-    .update({ status: 'sent', emailed_at: new Date().toISOString() }).eq('id', invoice.id).select('*').single();
-  if (error) return { invoice, error: new Error(`The email was delivered, but the sent status could not be saved: ${error.message}`) };
-  return { invoice: data };
+const getBillingSettings = async () => {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'billing_invoice_settings').maybeSingle();
+  if (error) throw error;
+  return normalizeBillingSettings(data ? JSON.parse(data.value) : getDefaultBillingSettings());
 };
 
 export default async function handler(req, res) {
@@ -145,9 +135,60 @@ export default async function handler(req, res) {
     if (path.startsWith('/api/admin/billing/')) {
       if (!authorized(req)) return res.status(401).json({ message: 'Unauthorized' });
 
+      if (method === 'GET' && path === '/api/admin/billing/settings') {
+        return res.status(200).json({ settings: await getBillingSettings() });
+      }
+
+      if (method === 'PUT' && path === '/api/admin/billing/settings') {
+        let settings;
+        try { settings = normalizeBillingSettings(bodyOf(req).settings); } catch (error) {
+          return res.status(400).json({ message: error.message });
+        }
+        const { error } = await supabase.from('settings').upsert({
+          key: 'billing_invoice_settings',
+          value: JSON.stringify(settings)
+        }, { onConflict: 'key' });
+        if (error) throw error;
+        return res.status(200).json({ settings });
+      }
+
+      if (method === 'GET' && path === '/api/admin/billing/overview') {
+        const settings = await getBillingSettings();
+        const [portfolio, invoiceResult, clientResult] = await Promise.all([
+          getPortfolio(),
+          supabase.from('billing_invoices').select('*').eq('billing_type', 'server_fee').is('deleted_at', null),
+          supabase.from('portfolio_clients').select('client_id,first_name,second_name,email,whatsapp_number,deleted_at').is('deleted_at', null)
+        ]);
+        if (invoiceResult.error) throw invoiceResult.error;
+        if (clientResult.error) throw clientResult.error;
+        const cycles = buildServerBillingSchedule({
+          events: portfolio.events,
+          activeAccounts: portfolio.active_accounts,
+          invoices: invoiceResult.data || [],
+          clients: clientResult.data || [],
+          settings,
+          today: new Date().toISOString().slice(0, 10)
+        });
+        return res.status(200).json({ settings, cycles });
+      }
+
       if (method === 'GET' && path === '/api/admin/billing/invoices') {
         const { data, error } = await supabase.from('billing_invoices').select('*')
-          .order('created_at', { ascending: false }).limit(100);
+          .is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
+        if (error) throw error;
+        return res.status(200).json({ invoices: data || [] });
+      }
+
+      if (method === 'GET' && path === '/api/admin/billing/audit') {
+        const { data, error } = await supabase.from('billing_invoices').select('*')
+          .is('deleted_at', null).order('payment_status').order('due_date').limit(500);
+        if (error) throw error;
+        return res.status(200).json({ invoices: data || [] });
+      }
+
+      if (method === 'GET' && path === '/api/admin/billing/deleted-invoices') {
+        const { data, error } = await supabase.from('billing_invoices').select('*')
+          .not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
       }
@@ -175,7 +216,8 @@ export default async function handler(req, res) {
         const monthEnd = `${period.periodStart.slice(0, 7)}-${String(monthEndDay).padStart(2, '0')}`;
         const { data: monthInvoices, error: periodError } = await supabase.from('billing_invoices')
           .select('period_type,period_start,server_maintenance_usd')
-          .eq('client_id', clientId).gte('period_start', monthStart).lte('period_start', monthEnd);
+          .eq('client_id', clientId).eq('billing_type', 'standard').is('deleted_at', null)
+          .gte('period_start', monthStart).lte('period_start', monthEnd);
         if (periodError) throw periodError;
         if ((monthInvoices || []).some(invoice => invoice.period_type !== input.period_type)) {
           return res.status(409).json({ message: 'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.' });
@@ -184,29 +226,57 @@ export default async function handler(req, res) {
           return res.status(409).json({ message: 'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.' });
         }
 
+        const settings = await getBillingSettings();
         let invoice;
         try {
-          invoice = createBillingInvoice(client, input, (monthInvoices || []).some(item => Number(item.server_maintenance_usd) > 0));
+          invoice = createBillingInvoice(client, input, (monthInvoices || []).some(item => Number(item.server_maintenance_usd) > 0), settings);
         } catch (error) {
           return res.status(400).json({ message: error.message });
         }
         const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
         if (error?.code === '23505') return res.status(409).json({ message: 'An invoice already exists for this client and billing period.' });
         if (error) throw error;
-        const delivery = await deliverSupabaseBillingInvoice(data);
-        if (delivery.error) {
-          return res.status(502).json({
-            message: `Invoice ${invoice.invoice_number} was saved, but email delivery failed: ${delivery.error.message}`,
-            invoice: delivery.invoice
-          });
+        return res.status(201).json({ invoice: data });
+      }
+
+      if (method === 'POST' && path === '/api/admin/billing/server-invoices') {
+        const input = bodyOf(req);
+        const clientId = String(input.client_id || '').trim().toUpperCase();
+        const dueDate = String(input.due_date || '').trim();
+        const settings = await getBillingSettings();
+        const [portfolio, invoiceResult, clientResult] = await Promise.all([
+          getPortfolio(),
+          supabase.from('billing_invoices').select('*').eq('billing_type', 'server_fee').is('deleted_at', null),
+          supabase.from('portfolio_clients').select('*').eq('client_id', clientId).is('deleted_at', null).maybeSingle()
+        ]);
+        if (invoiceResult.error) throw invoiceResult.error;
+        if (clientResult.error) throw clientResult.error;
+        const cycles = buildServerBillingSchedule({
+          events: portfolio.events,
+          activeAccounts: portfolio.active_accounts,
+          invoices: invoiceResult.data || [],
+          clients: clientResult.data ? [clientResult.data] : [],
+          settings,
+          today: new Date().toISOString().slice(0, 10)
+        });
+        const cycle = cycles.find(item => item.client_id === clientId && item.due_date === dueDate);
+        if (!cycle) return res.status(404).json({ message: 'No enabled server billing cycle was found for this client and due date.' });
+        if (cycle.invoice_id) return res.status(409).json({ message: 'An invoice already exists for this server billing cycle.' });
+        if (!clientResult.data) return res.status(404).json({ message: 'The registered client for this server billing cycle is no longer active.' });
+        let invoice;
+        try { invoice = createServerBillingInvoice(clientResult.data, dueDate, cycle.account_numbers, settings); } catch (error) {
+          return res.status(400).json({ message: error.message });
         }
-        return res.status(201).json({ invoice: delivery.invoice });
+        const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
+        if (error?.code === '23505') return res.status(409).json({ message: 'A server fee invoice already exists for this client and due date.' });
+        if (error) throw error;
+        return res.status(201).json({ invoice: data });
       }
 
       const pdfMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/pdf$/.exec(path);
       if (method === 'GET' && pdfMatch) {
         const { data: invoice, error } = await supabase.from('billing_invoices').select('*')
-          .eq('id', Number(pdfMatch[1])).maybeSingle();
+          .eq('id', Number(pdfMatch[1])).is('deleted_at', null).maybeSingle();
         if (error) throw error;
         if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
         const pdf = await createBillingPdf(invoice);
@@ -215,15 +285,45 @@ export default async function handler(req, res) {
         return res.status(200).send(pdf);
       }
 
-      const sendMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/send$/.exec(path);
-      if (method === 'POST' && sendMatch) {
+      const paidMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/paid$/.exec(path);
+      if (method === 'POST' && paidMatch) {
+        const id = Number(paidMatch[1]);
         const { data: invoice, error } = await supabase.from('billing_invoices').select('*')
-          .eq('id', Number(sendMatch[1])).maybeSingle();
+          .eq('id', id).is('deleted_at', null).maybeSingle();
         if (error) throw error;
         if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
-        const delivery = await deliverSupabaseBillingInvoice(invoice);
-        if (delivery.error) return res.status(502).json({ message: `Email delivery failed: ${delivery.error.message}`, invoice: delivery.invoice });
-        return res.status(200).json({ invoice: delivery.invoice });
+        if (invoice.payment_status === 'paid') return res.status(409).json({ message: 'This invoice is already marked as paid.' });
+        const reference = String(bodyOf(req).payment_reference || '').trim();
+        if (reference.length > 200) return res.status(400).json({ message: 'Payment reference must be 200 characters or fewer.' });
+        const { data, error: updateError } = await supabase.from('billing_invoices')
+          .update({ payment_status: 'paid', paid_at: new Date().toISOString(), payment_method: 'manual_verification', payment_reference: reference || null })
+          .eq('id', id).is('deleted_at', null).select('*').single();
+        if (updateError) throw updateError;
+        return res.status(200).json({ invoice: data });
+      }
+
+      const permanentMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/permanent$/.exec(path);
+      if (method === 'DELETE' && permanentMatch) {
+        const id = Number(permanentMatch[1]);
+        const { data: existing, error: existingError } = await supabase.from('billing_invoices')
+          .select('deleted_at').eq('id', id).maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
+        if (!existing.deleted_at) return res.status(409).json({ message: 'Delete the invoice first before permanent deletion.' });
+        const { data, error } = await supabase.from('billing_invoices').delete().eq('id', id).select('id').maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ message: 'Invoice not found.' });
+        return res.status(200).json({ ok: true });
+      }
+
+      const invoiceMatch = /^\/api\/admin\/billing\/invoices\/(\d+)$/.exec(path);
+      if (method === 'DELETE' && invoiceMatch) {
+        const { data, error } = await supabase.from('billing_invoices')
+          .update({ deleted_at: new Date().toISOString() }).eq('id', Number(invoiceMatch[1])).is('deleted_at', null)
+          .select('id').maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ message: 'Active invoice not found.' });
+        return res.status(200).json({ ok: true });
       }
 
       return res.status(404).json({ message: 'Billing endpoint not found.' });
@@ -542,10 +642,17 @@ export default async function handler(req, res) {
       const accountNumber = String(input.account_number || '').trim();
       const amount = Number(input.amount);
       const createdAt = input.created_at ? new Date(input.created_at) : new Date();
+      const serverBillingEnabled = type === 'onboarded' && input.server_billing_enabled === true;
       if (!['onboarded', 'profit_withdrawn'].includes(type)) return res.status(400).json({ message: 'Choose onboarding or profit withdrawal' });
       if (!clientId || !accountNumber) return res.status(400).json({ message: 'Client ID and account number are required' });
       if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: 'Enter an amount greater than zero' });
       if (Number.isNaN(createdAt.getTime())) return res.status(400).json({ message: 'Enter a valid date and time' });
+      const serverBillingOnboardingDate = String(input.server_billing_onboarding_date || createdAt.toISOString().slice(0, 10));
+      if (serverBillingEnabled && (!/^\d{4}-\d{2}-\d{2}$/.test(serverBillingOnboardingDate)
+        || Number.isNaN(new Date(`${serverBillingOnboardingDate}T00:00:00.000Z`).getTime())
+        || new Date(`${serverBillingOnboardingDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== serverBillingOnboardingDate)) {
+        return res.status(400).json({ message: 'Enter a valid server billing onboarding date' });
+      }
 
       const { data: client, error: clientError } = await supabase.from('portfolio_clients').select('*').eq('client_id', clientId).is('deleted_at', null).maybeSingle();
       if (clientError) throw clientError;
@@ -561,7 +668,9 @@ export default async function handler(req, res) {
         client_name: `${client.first_name} ${client.second_name}`.trim(),
         account_number: accountNumber,
         amount,
-        created_at: createdAt.toISOString()
+        created_at: createdAt.toISOString(),
+        server_billing_enabled: serverBillingEnabled && !active,
+        server_billing_onboarding_date: serverBillingEnabled && !active ? serverBillingOnboardingDate : null
       });
       if (error) throw error;
       return res.status(201).json(await getPortfolio());
