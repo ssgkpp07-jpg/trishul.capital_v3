@@ -174,6 +174,15 @@ create table if not exists billing_invoice_sequences (
 alter table billing_invoice_sequences enable row level security;
 revoke all on billing_invoice_sequences from anon, authenticated;
 
+create table if not exists billing_invoice_reusable_sequences (
+  issue_year integer not null,
+  issue_month integer not null check (issue_month between 1 and 12),
+  sequence bigint not null check (sequence > 0),
+  primary key (issue_year, issue_month, sequence)
+);
+alter table billing_invoice_reusable_sequences enable row level security;
+revoke all on billing_invoice_reusable_sequences from anon, authenticated;
+
 insert into billing_invoice_sequences(issue_year, issue_month, last_sequence)
 select (parts.matches)[3]::integer, (parts.matches)[2]::integer, max((parts.matches)[1]::bigint)
 from billing_invoices invoice
@@ -195,6 +204,17 @@ begin
   if p_issue_year < 2000 or p_issue_year > 2100 or p_issue_month < 1 or p_issue_month > 12 then
     raise exception 'Invoice issue date is invalid';
   end if;
+  select sequence into allocated_sequence
+  from billing_invoice_reusable_sequences
+  where issue_year = p_issue_year and issue_month = p_issue_month
+  order by sequence
+  limit 1
+  for update skip locked;
+  if found then
+    delete from billing_invoice_reusable_sequences
+    where issue_year = p_issue_year and issue_month = p_issue_month and sequence = allocated_sequence;
+    return allocated_sequence;
+  end if;
   insert into billing_invoice_sequences(issue_year, issue_month, last_sequence)
   values (p_issue_year, p_issue_month, 1)
   on conflict (issue_year, issue_month) do update
@@ -203,6 +223,42 @@ begin
   return allocated_sequence;
 end;
 $$;
+
+create or replace function permanently_delete_billing_invoice(p_invoice_id bigint)
+returns boolean
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $$
+declare
+  invoice_number_value text;
+  deleted_at_value timestamptz;
+  invoice_parts text[];
+begin
+  select invoice_number, deleted_at
+  into invoice_number_value, deleted_at_value
+  from billing_invoices
+  where id = p_invoice_id
+  for update;
+  if not found then
+    return false;
+  end if;
+  if deleted_at_value is null then
+    raise exception 'Delete the invoice first before permanent deletion';
+  end if;
+
+  invoice_parts := regexp_match(invoice_number_value, '^INV-TC-([0-9]+)/([0-9]{2})/([0-9]{4})$');
+  if invoice_parts is not null then
+    insert into billing_invoice_reusable_sequences(issue_year, issue_month, sequence)
+    values (invoice_parts[3]::integer, invoice_parts[2]::integer, invoice_parts[1]::bigint)
+    on conflict do nothing;
+  end if;
+  delete from billing_invoices where id = p_invoice_id;
+  return true;
+end;
+$$;
+revoke all on function permanently_delete_billing_invoice(bigint) from public, anon, authenticated;
+grant execute on function permanently_delete_billing_invoice(bigint) to service_role;
 
 drop function if exists update_portfolio_account(text, text, text, boolean);
 create or replace function update_portfolio_account(
