@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Pay Invoice | Trishul Capital</title>
+  <style>
+    :root { font-family: Arial, sans-serif; color: #202632; background: #f3f5f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    main { width: min(100%, 460px); padding: 28px; border-radius: 16px; background: #fff; box-shadow: 0 12px 36px #1720331a; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    .intro, .notice { color: #596273; line-height: 1.5; }
+    dl { margin: 24px 0; }
+    dl div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #e8ebef; }
+    dt { color: #596273; }
+    dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-weight: 600; }
+    .amount { color: #168447; font-size: 22px; }
+    .button { display: flex; min-height: 48px; align-items: center; justify-content: center; margin-top: 12px; padding: 12px 16px; border-radius: 8px; color: #fff; background: #168447; font-weight: 700; text-decoration: none; text-align: center; }
+    .button.secondary { color: #202632; border: 1px solid #cbd1d9; background: #fff; }
+    button { width: 100%; min-height: 44px; margin-top: 12px; border: 0; border-radius: 8px; color: #202632; background: #edf0f4; font-weight: 600; cursor: pointer; }
+    a:focus-visible, button:focus-visible { outline: 3px solid #245dd8; outline-offset: 3px; }
+    .notice { margin: 20px 0 0; font-size: 13px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pay invoice</h1>
+    <p class="intro">Check the payee and amount before confirming payment in your UPI app.</p>
+    <p id="paymentError" class="notice" role="alert" hidden></p>
+    <section id="paymentDetails" hidden aria-live="polite">
+      <dl>
+        <div><dt>Payee</dt><dd id="payeeName"></dd></div>
+        <div><dt>UPI ID</dt><dd id="upiId"></dd></div>
+        <div><dt>Invoice</dt><dd id="invoiceReference"></dd></div>
+        <div><dt>Amount</dt><dd id="amount" class="amount"></dd></div>
+      </dl>
+      <a id="googlePayLink" class="button" rel="noopener">Continue to Google Pay (Android)</a>
+      <a id="otherUpiLink" class="button secondary" rel="noopener">Open another UPI app</a>
+      <button id="copyUpiId" type="button">Copy UPI ID</button>
+      <p id="pageNotice" class="notice">Google Pay must be installed. If it does not open, choose another UPI app. Review the amount and payee in your app; payment is not verified automatically.</p>
+    </section>
+  </main>
+  <script type="module">
+    import { createPaymentLinks } from './payment.js';
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const pa = params.get('pa') || '';
+      const pn = params.get('pn') || '';
+      const am = params.get('am') || '';
+      const cu = params.get('cu') || '';
+      const tn = params.get('tn') || '';
+      const amount = Number(am);
+      const upiIdPattern = /^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$/;
+      const error = document.getElementById('paymentError');
+      const details = document.getElementById('paymentDetails');
+      if (!upiIdPattern.test(pa) || !Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(am) || cu !== 'INR' || !pn || pn.length > 100 || tn.length > 80) {
+        error.textContent = 'This payment link is invalid or incomplete. Please use the payment details on your invoice.';
+        error.hidden = false;
+        return;
+      }
+
+      const paymentLinks = createPaymentLinks({ pa, pn, am: amount.toFixed(2), tn });
+      const googlePayLink = document.getElementById('googlePayLink');
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      document.getElementById('payeeName').textContent = pn;
+      document.getElementById('upiId').textContent = pa;
+      document.getElementById('invoiceReference').textContent = tn.replace(/^Invoice\s*/, '');
+      document.getElementById('amount').textContent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+      googlePayLink.href = paymentLinks.googlePay;
+      googlePayLink.hidden = !isAndroid;
+      document.getElementById('otherUpiLink').href = paymentLinks.otherUpi;
+      if (!isAndroid) {
+        document.getElementById('pageNotice').textContent = 'Google Pay direct launch requires Android. On other devices, choose another UPI app or scan the QR code on your invoice.';
+      }
+      document.getElementById('copyUpiId').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(pa);
+          document.getElementById('copyUpiId').textContent = 'UPI ID copied';
+        } catch {
+          document.getElementById('pageNotice').textContent = `Copy the UPI ID manually: ${pa}. Review the amount and payee in your app; payment is not verified automatically.`;
+        }
+      });
+      details.hidden = false;
+    })();
+  </script>
+</body>
+</html>
