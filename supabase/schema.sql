@@ -160,8 +160,9 @@ create index if not exists billing_invoices_client_period_idx on billing_invoice
 create unique index if not exists billing_invoices_standard_period_idx
   on billing_invoices(client_id, period_start, period_type)
   where billing_type = 'standard' and deleted_at is null;
-create unique index if not exists billing_invoices_server_cycle_idx
-  on billing_invoices(client_id, server_billing_due_date)
+drop index if exists billing_invoices_server_cycle_idx;
+create unique index billing_invoices_server_cycle_idx
+  on billing_invoices(client_id, server_billing_due_date, account_number)
   where billing_type = 'server_fee' and deleted_at is null;
 
 create table if not exists billing_invoice_sequences (
