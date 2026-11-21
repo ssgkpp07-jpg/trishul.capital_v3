@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import PDFDocument from 'pdfkit';
 
 const roundMoney = amount => Math.round((amount + Number.EPSILON) * 100) / 100;
@@ -221,9 +220,41 @@ export function calculateBillingAmounts(input, maintenanceAlreadyCharged = false
   };
 }
 
-function createInvoiceNumber() {
-  const now = new Date();
-  return `TC-${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}-${randomUUID().slice(0, 8).toUpperCase()}`;
+export function formatBillingInvoiceNumber(year, month, sequence) {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100
+    || !Number.isInteger(month) || month < 1 || month > 12
+    || !Number.isInteger(sequence) || sequence < 1) {
+    throw new Error('Invoice number date or sequence is invalid.');
+  }
+  return `INV-TC-${String(sequence).padStart(3, '0')}/${String(month).padStart(2, '0')}/${year}`;
+}
+
+function validateBillingInvoiceNumber(invoiceNumber, issueDate) {
+  const match = /^INV-TC-\d{3,}\/(\d{2})\/(\d{4})$/.exec(String(invoiceNumber || ''));
+  if (!match || !validIsoDate(String(issueDate || ''))
+    || Number(match[1]) !== Number(issueDate.slice(5, 7))
+    || Number(match[2]) !== Number(issueDate.slice(0, 4))) {
+    throw new Error('A valid monthly invoice number matching the issue date is required.');
+  }
+}
+
+export function replaceInvoiceAccountNumber(invoice, oldAccountNumber, newAccountNumber) {
+  const oldNumber = String(oldAccountNumber || '').trim();
+  const newNumber = String(newAccountNumber || '').trim();
+  const customLines = typeof invoice.custom_line_items === 'string'
+    ? JSON.parse(invoice.custom_line_items)
+    : invoice.custom_line_items;
+  const descriptions = (Array.isArray(customLines) ? customLines : []).map(line => ({
+    ...line,
+    description: String(line.description || '')
+      .replace(new RegExp(`\\b(account|Account) ${oldNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[\\s·,])`, 'g'), (_, label) => `${label} ${newNumber}`)
+  }));
+  const accounts = String(invoice.account_number || '').split(',').map(value => value.trim());
+  return {
+    ...invoice,
+    account_number: accounts.map(value => value === oldNumber ? newNumber : value).join(', '),
+    custom_line_items: typeof invoice.custom_line_items === 'string' ? JSON.stringify(descriptions) : descriptions
+  };
 }
 
 function clientInvoiceDetails(client) {
@@ -240,16 +271,17 @@ function clientInvoiceDetails(client) {
   };
 }
 
-export function createBillingInvoice(client, input, maintenanceAlreadyCharged = false, settings = getDefaultBillingSettings()) {
+export function createBillingInvoice(client, input, maintenanceAlreadyCharged = false, settings = getDefaultBillingSettings(), invoiceNumber, issueDate = new Date().toISOString().slice(0, 10)) {
   const accountNumber = String(input.account_number || '').trim();
   if (!accountNumber || accountNumber.length > 100) throw new Error('Choose a valid portfolio account number.');
+  validateBillingInvoiceNumber(invoiceNumber, issueDate);
   const { periodStart, periodEnd } = getBillingPeriodDates(input);
   const amounts = calculateBillingAmounts(input, maintenanceAlreadyCharged);
   return {
-    invoice_number: createInvoiceNumber(),
+    invoice_number: invoiceNumber,
     ...clientInvoiceDetails(client),
     account_number: accountNumber,
-    issue_date: new Date().toISOString().slice(0, 10),
+    issue_date: issueDate,
     due_date: periodEnd,
     period_type: input.period_type,
     period_start: periodStart,
@@ -268,8 +300,9 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
   };
 }
 
-export function createServerBillingInvoice(client, dueDate, accountNumbers, settings) {
+export function createServerBillingInvoice(client, dueDate, accountNumbers, settings, invoiceNumber, issueDate = new Date().toISOString().slice(0, 10)) {
   const normalizedSettings = normalizeBillingSettings(settings);
+  validateBillingInvoiceNumber(invoiceNumber, issueDate);
   if (!validIsoDate(String(dueDate || ''))) throw new Error('Choose a valid server billing due date.');
   const accounts = [...new Set((accountNumbers || []).map(value => String(value || '').trim()).filter(Boolean))].sort();
   if (!accounts.length || accounts.length > 50 || accounts.some(value => value.length > 100)) {
@@ -291,10 +324,10 @@ export function createServerBillingInvoice(client, dueDate, accountNumbers, sett
     custom_line_items: feeLines
   });
   return {
-    invoice_number: createInvoiceNumber(),
+    invoice_number: invoiceNumber,
     ...clientInvoiceDetails(client),
     account_number: accounts.join(', '),
-    issue_date: new Date().toISOString().slice(0, 10),
+    issue_date: issueDate,
     due_date: dueDate,
     period_type: 'monthly',
     period_start: periodStart,
