@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
-import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, createServerBillingInvoice, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
+import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, createServerBillingInvoice, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
@@ -14,7 +14,7 @@ const getSupabase = () => {
   }
   return supabaseClient;
 };
-const supabase = { from: (...args) => getSupabase().from(...args) };
+const supabase = { from: (...args) => getSupabase().from(...args), rpc: (...args) => getSupabase().rpc(...args) };
 const secret = process.env.JWT_SECRET || 'change-this-secret';
 
 const json = (statusCode, body) => {
@@ -93,6 +93,15 @@ const getBillingSettings = async () => {
   const { data, error } = await supabase.from('settings').select('value').eq('key', 'billing_invoice_settings').maybeSingle();
   if (error) throw error;
   return normalizeBillingSettings(data ? JSON.parse(data.value) : getDefaultBillingSettings());
+};
+const nextBillingInvoiceNumber = async issueDate => {
+  const [year, month] = issueDate.slice(0, 7).split('-').map(Number);
+  const { data: sequence, error } = await supabase.rpc('next_billing_invoice_sequence', {
+    p_issue_year: year,
+    p_issue_month: month
+  });
+  if (error) throw error;
+  return formatBillingInvoiceNumber(year, month, Number(sequence));
 };
 
 export default async function handler(req, res) {
@@ -227,9 +236,11 @@ export default async function handler(req, res) {
         }
 
         const settings = await getBillingSettings();
+        const issueDate = new Date().toISOString().slice(0, 10);
+        const invoiceNumber = await nextBillingInvoiceNumber(issueDate);
         let invoice;
         try {
-          invoice = createBillingInvoice(client, input, (monthInvoices || []).some(item => Number(item.server_maintenance_usd) > 0), settings);
+          invoice = createBillingInvoice(client, input, (monthInvoices || []).some(item => Number(item.server_maintenance_usd) > 0), settings, invoiceNumber, issueDate);
         } catch (error) {
           return res.status(400).json({ message: error.message });
         }
@@ -263,8 +274,12 @@ export default async function handler(req, res) {
         if (!cycle) return res.status(404).json({ message: 'No enabled server billing cycle was found for this client and due date.' });
         if (cycle.invoice_id) return res.status(409).json({ message: 'An invoice already exists for this server billing cycle.' });
         if (!clientResult.data) return res.status(404).json({ message: 'The registered client for this server billing cycle is no longer active.' });
+        const issueDate = new Date().toISOString().slice(0, 10);
+        const invoiceNumber = await nextBillingInvoiceNumber(issueDate);
         let invoice;
-        try { invoice = createServerBillingInvoice(clientResult.data, dueDate, cycle.account_numbers, settings); } catch (error) {
+        try {
+          invoice = createServerBillingInvoice(clientResult.data, dueDate, cycle.account_numbers, settings, invoiceNumber, issueDate);
+        } catch (error) {
           return res.status(400).json({ message: error.message });
         }
         const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
@@ -632,6 +647,35 @@ export default async function handler(req, res) {
       const { data, error } = await supabase.from('portfolio_events').update({ deleted_at: new Date().toISOString() }).eq('id', eventId).is('deleted_at', null).select('id').maybeSingle();
       if (error) throw error;
       if (!data) return res.status(404).json({ message: 'Active portfolio entry not found' });
+      return res.status(200).json(await getPortfolio());
+    }
+
+    if (method === 'PUT' && path === '/api/admin/portfolio/account') {
+      const input = bodyOf(req);
+      const clientId = String(input.client_id || '').trim().toUpperCase();
+      const accountNumber = String(input.account_number || '').trim();
+      const newAccountNumber = String(input.new_account_number || '').trim();
+      if (!clientId || !accountNumber || !newAccountNumber || accountNumber.length > 100 || newAccountNumber.length > 100) {
+        return res.status(400).json({ message: 'Client ID and valid old and new account numbers are required.' });
+      }
+      if (typeof input.server_billing_enabled !== 'boolean') {
+        return res.status(400).json({ message: 'Choose whether monthly server billing is enabled.' });
+      }
+      const portfolio = await getPortfolio();
+      const active = portfolio.active_accounts.find(account => account.client_id === clientId && account.account_number === accountNumber);
+      if (!active) return res.status(404).json({ message: 'Active account not found.' });
+      if (portfolio.active_accounts.some(account => account.account_number === newAccountNumber
+        && !(account.client_id === clientId && account.account_number === accountNumber))) {
+        return res.status(409).json({ message: 'This account number is already assigned to another active account.' });
+      }
+      const { data: result, error } = await supabase.rpc('update_portfolio_account', {
+        p_client_id: clientId,
+        p_account_number: accountNumber,
+        p_new_account_number: newAccountNumber,
+        p_server_billing_enabled: input.server_billing_enabled
+      });
+      if (error) throw error;
+      if (result?.error) return res.status(Number(result.status) || 409).json({ message: result.error });
       return res.status(200).json(await getPortfolio());
     }
 
