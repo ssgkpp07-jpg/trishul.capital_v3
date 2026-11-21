@@ -22,9 +22,9 @@ main>.bar:first-child .muted{display:none}
 .status{padding:7px 10px;border-color:#27313d;color:#a9bad1;background:#111720}
 .logout-button{width:auto;margin:0 0 0 8px;padding:7px 12px;border:1px solid #303947;background:#111720;color:#efc24c;font-size:12px}
 body:not(.admin-authenticated) .logout-button{display:none}
-.admin-topbar{position:relative;margin:0 0 24px;padding:0 0 18px;border-bottom:1px solid #202630}
+.admin-topbar{display:none}
 .admin-menu-button{display:none}
-#adminCurrentPage{color:#eaf0f8;font:600 24px/1.25 Inter,"DM Sans",Arial,sans-serif}
+#adminCurrentPage{display:none}
 .admin-nav{position:fixed;z-index:31;inset:190px auto 16px 16px;width:192px;display:none;flex-direction:column;align-items:stretch;gap:5px;padding:0;background:transparent;border:0;box-shadow:none;overflow-y:auto}
 body.admin-authenticated .admin-nav{display:flex}
 .admin-nav::before{content:"WORKSPACE";padding:0 12px 10px;color:#718096;font-size:10px;font-weight:700;letter-spacing:1.5px}
@@ -36,8 +36,6 @@ body.admin-authenticated .admin-nav{display:flex}
 .admin-nav button.active{border-color:#322b18;background:#211e15;color:#efc24c}
 .admin-nav button.active::before{color:#efc24c}
 .admin-nav.mobile-open{display:flex}
-.admin-topbar::before{content:"FINANCIAL CONTROL CENTRE";display:block;margin:0 0 8px;color:#d9b346;font-size:10px;font-weight:700;letter-spacing:1.6px}
-.admin-topbar::after{content:"Manage client accounts and portfolio activity in one clear workspace.";display:block;margin:8px 0 0;color:#8796ab;font-size:13px}
 .overview-panel{margin-bottom:26px}
 .overview-heading{position:relative;display:flex;align-items:center;justify-content:space-between;gap:24px;margin:0 0 22px;padding:8px 0}
 .overview-heading h2{margin:8px 0 6px;font-size:28px;line-height:1.22}
@@ -81,7 +79,7 @@ body.admin-authenticated #login{display:none}
 #login::after{content:"Sign in to your private workspace";display:block;margin-top:16px;color:#91a0b7;text-align:center;font-size:12px}
 #login input,#login button{margin:6px 0}
 @media(max-width:850px){main{margin-left:190px;padding:22px}.admin-brand{width:190px!important}.admin-nav{left:10px;width:170px}.portfolio-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:650px){main,body.admin-authenticated main{margin:0;padding:16px 14px 36px}body:not(.admin-authenticated) main{margin:0;padding:16px 14px 36px}.admin-brand{display:none!important}.admin-topbar{padding-left:54px}.admin-menu-button{position:absolute;left:0;top:3px;display:grid}.admin-nav{inset:0 auto 0 0;width:min(270px,82vw);padding:115px 15px 20px;background:#0d1118;border-right:1px solid #252c37;box-shadow:14px 0 35px #0009;transform:translateX(-105%);transition:transform .2s ease}.admin-nav.mobile-open{transform:translateX(0)}.main>.bar:first-child{margin-bottom:20px}.admin-topbar::after{max-width:320px;line-height:1.5}.grid,.two{grid-template-columns:1fr}.portfolio-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-heading{align-items:flex-start;flex-direction:column;gap:14px}.overview-heading h2{font-size:25px}.overview-action{width:auto}.dashboard-metrics{gap:8px}.dashboard-card{padding:12px}.dashboard-card strong{font-size:19px}}
+@media(max-width:650px){main,body.admin-authenticated main{margin:0;padding:16px 14px 36px}body:not(.admin-authenticated) main{margin:0;padding:16px 14px 36px}.admin-brand{display:none!important}.admin-topbar{position:relative;display:block;height:42px;margin:0 0 12px;padding:0;border:0}.admin-menu-button{position:absolute;left:0;top:0;display:grid}.admin-nav{inset:0 auto 0 0;width:min(270px,82vw);padding:115px 15px 20px;background:#0d1118;border-right:1px solid #252c37;box-shadow:14px 0 35px #0009;transform:translateX(-105%);transition:transform .2s ease}.admin-nav.mobile-open{transform:translateX(0)}.main>.bar:first-child{margin-bottom:20px}.grid,.two{grid-template-columns:1fr}.portfolio-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-heading{align-items:flex-start;flex-direction:column;gap:14px}.overview-heading h2{font-size:25px}.overview-action{width:auto}.dashboard-metrics{gap:8px}.dashboard-card{padding:12px}.dashboard-card strong{font-size:19px}}
 @media(max-width:420px){main>.bar:first-child{align-items:flex-start;flex-direction:column}.portfolio-summary{grid-template-columns:1fr 1fr}.portfolio-stat{padding:11px}.portfolio-stat strong{font-size:17px}.dashboard-card span{font-size:11px}}
 </style></head><body><aside class="admin-brand" aria-label="Trishul Capital admin dashboard"><img src="/admin/assets/dashboard-logo.webp" alt="Trishul Capital"></aside><main>
 <div class="bar"><div><h1>TRISHUL CAPITAL / WORKSPACE</h1><p class="muted">This dashboard is intentionally not linked from the public website.</p></div><div><span id="apiStatus" class="status">Checking API…</span><button type="button" class="logout-button" onclick="logout()">Sign out</button></div></div>
