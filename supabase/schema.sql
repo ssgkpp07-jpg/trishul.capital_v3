@@ -92,11 +92,15 @@ create table if not exists portfolio_events (
   account_number text not null,
   amount numeric(14,2) not null check (amount > 0),
   created_at timestamptz not null default now(),
-  deleted_at timestamptz
+  deleted_at timestamptz,
+  server_billing_enabled boolean not null default false,
+  server_billing_onboarding_date date
 );
 
 alter table portfolio_events add column if not exists deleted_at timestamptz;
 alter table portfolio_events add column if not exists client_id text references portfolio_clients(client_id) on delete cascade;
+alter table portfolio_events add column if not exists server_billing_enabled boolean not null default false;
+alter table portfolio_events add column if not exists server_billing_onboarding_date date;
 
 create index if not exists portfolio_events_account_created_idx on portfolio_events(account_number, created_at desc);
 alter table portfolio_events drop constraint if exists portfolio_events_event_type_check;
@@ -128,13 +132,37 @@ create table if not exists billing_invoices (
   status text not null default 'email_failed' check (status in ('sent', 'email_failed')),
   emailed_at timestamptz,
   created_at timestamptz not null default now(),
-  unique (client_id, period_start, period_type)
+  billing_type text not null default 'standard' check (billing_type in ('standard', 'server_fee')),
+  server_billing_due_date date,
+  invoice_settings jsonb not null default '{}'::jsonb,
+  payment_status text not null default 'pending' check (payment_status in ('pending', 'paid')),
+  paid_at timestamptz,
+  payment_method text,
+  payment_reference text,
+  delivery_status text not null default 'not_sent',
+  deleted_at timestamptz
 );
 
 alter table billing_invoices add column if not exists account_number text not null default '';
+alter table billing_invoices add column if not exists billing_type text not null default 'standard';
+alter table billing_invoices add column if not exists server_billing_due_date date;
+alter table billing_invoices add column if not exists invoice_settings jsonb not null default '{}'::jsonb;
+alter table billing_invoices add column if not exists payment_status text not null default 'pending';
+alter table billing_invoices add column if not exists paid_at timestamptz;
+alter table billing_invoices add column if not exists payment_method text;
+alter table billing_invoices add column if not exists payment_reference text;
+alter table billing_invoices add column if not exists delivery_status text not null default 'not_sent';
+alter table billing_invoices add column if not exists deleted_at timestamptz;
+alter table billing_invoices drop constraint if exists billing_invoices_client_id_period_start_period_type_key;
 
 create index if not exists billing_invoices_created_idx on billing_invoices(created_at desc);
 create index if not exists billing_invoices_client_period_idx on billing_invoices(client_id, period_start desc);
+create unique index if not exists billing_invoices_standard_period_idx
+  on billing_invoices(client_id, period_start, period_type)
+  where billing_type = 'standard' and deleted_at is null;
+create unique index if not exists billing_invoices_server_cycle_idx
+  on billing_invoices(client_id, server_billing_due_date)
+  where billing_type = 'server_fee' and deleted_at is null;
 
 insert into settings(key,value) values
   ('contact_email','contact@trishulcapital.com'),
