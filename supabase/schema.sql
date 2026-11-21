@@ -164,6 +164,147 @@ create unique index if not exists billing_invoices_server_cycle_idx
   on billing_invoices(client_id, server_billing_due_date)
   where billing_type = 'server_fee' and deleted_at is null;
 
+create table if not exists billing_invoice_sequences (
+  issue_year integer not null,
+  issue_month integer not null check (issue_month between 1 and 12),
+  last_sequence bigint not null check (last_sequence > 0),
+  primary key (issue_year, issue_month)
+);
+alter table billing_invoice_sequences enable row level security;
+revoke all on billing_invoice_sequences from anon, authenticated;
+
+insert into billing_invoice_sequences(issue_year, issue_month, last_sequence)
+select (parts.matches)[3]::integer, (parts.matches)[2]::integer, max((parts.matches)[1]::bigint)
+from billing_invoices invoice
+cross join lateral (select regexp_match(invoice.invoice_number, '^INV-TC-([0-9]+)/([0-9]{2})/([0-9]{4})$') as matches) parts
+where parts.matches is not null
+group by (parts.matches)[3]::integer, (parts.matches)[2]::integer
+on conflict (issue_year, issue_month) do update
+set last_sequence = greatest(billing_invoice_sequences.last_sequence, excluded.last_sequence);
+
+create or replace function next_billing_invoice_sequence(p_issue_year integer, p_issue_month integer)
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $$
+declare
+  allocated_sequence bigint;
+begin
+  if p_issue_year < 2000 or p_issue_year > 2100 or p_issue_month < 1 or p_issue_month > 12 then
+    raise exception 'Invoice issue date is invalid';
+  end if;
+  insert into billing_invoice_sequences(issue_year, issue_month, last_sequence)
+  values (p_issue_year, p_issue_month, 1)
+  on conflict (issue_year, issue_month) do update
+  set last_sequence = billing_invoice_sequences.last_sequence + 1
+  returning last_sequence into allocated_sequence;
+  return allocated_sequence;
+end;
+$$;
+
+create or replace function update_portfolio_account(
+  p_client_id text,
+  p_account_number text,
+  p_new_account_number text,
+  p_server_billing_enabled boolean
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, public, pg_temp
+as $$
+declare
+  onboarding_id bigint;
+begin
+  perform pg_advisory_xact_lock(hashtext(p_client_id), hashtext(p_account_number));
+
+  if not exists (
+    select 1
+    from portfolio_events
+    where client_id = p_client_id and account_number = p_account_number and deleted_at is null
+    group by client_id, account_number
+    having sum(case when event_type in ('onboarded', 'funds_added') then amount
+                    when event_type = 'offboarded' then -amount else 0 end) > 0
+  ) then
+    return jsonb_build_object('error', 'Active account not found.', 'status', 404);
+  end if;
+
+  if exists (
+    select 1
+    from portfolio_events
+    where account_number = p_new_account_number and deleted_at is null
+    group by client_id, account_number
+    having sum(case when event_type in ('onboarded', 'funds_added') then amount
+                    when event_type = 'offboarded' then -amount else 0 end) > 0
+       and not (coalesce(client_id, '') = p_client_id and account_number = p_account_number)
+  ) then
+    return jsonb_build_object('error', 'This account number is already assigned to another active account.', 'status', 409);
+  end if;
+
+  select event.id into onboarding_id
+  from portfolio_events event
+  where event.client_id = p_client_id and event.account_number = p_account_number
+    and event.event_type = 'onboarded' and event.deleted_at is null
+    and not exists (
+      select 1 from portfolio_events later
+      where later.client_id = event.client_id and later.account_number = event.account_number
+        and later.event_type = 'offboarded' and later.deleted_at is null
+        and (later.created_at, later.id) > (event.created_at, event.id)
+    )
+  order by event.created_at desc, event.id desc
+  limit 1;
+  if onboarding_id is null then
+    return jsonb_build_object('error', 'No active onboarding record was found for this account.', 'status', 409);
+  end if;
+
+  if p_new_account_number <> p_account_number then
+    update portfolio_events
+    set account_number = p_new_account_number
+    where client_id = p_client_id and account_number = p_account_number;
+  end if;
+  update portfolio_events
+  set server_billing_enabled = p_server_billing_enabled,
+      server_billing_onboarding_date = case
+        when p_server_billing_enabled then coalesce(server_billing_onboarding_date, created_at::date)
+        else null
+      end
+  where id = onboarding_id;
+
+  if p_new_account_number <> p_account_number then
+    update billing_invoices invoice
+    set account_number = array_to_string(array(
+          select case when btrim(token.value) = p_account_number then p_new_account_number else btrim(token.value) end
+          from regexp_split_to_table(coalesce(invoice.account_number, ''), ',') as token(value)
+        ), ', '),
+        custom_line_items = case
+          when jsonb_typeof(invoice.custom_line_items) = 'array' then (
+            select coalesce(jsonb_agg(
+              case when jsonb_typeof(line.value) = 'object' then jsonb_set(
+                line.value,
+                '{description}',
+                to_jsonb(replace(replace(coalesce(line.value->>'description', ''),
+                  'Account ' || p_account_number || ' ', 'Account ' || p_new_account_number || ' '),
+                  'account ' || p_account_number || ' ', 'account ' || p_new_account_number || ' ')),
+                true
+              ) else line.value end
+            ), '[]'::jsonb)
+            from jsonb_array_elements(invoice.custom_line_items) as line(value)
+          )
+          else invoice.custom_line_items
+        end
+    where invoice.client_id = p_client_id;
+  end if;
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function next_billing_invoice_sequence(integer, integer) from public;
+revoke all on function update_portfolio_account(text, text, text, boolean) from public;
+grant execute on function next_billing_invoice_sequence(integer, integer) to service_role;
+grant execute on function update_portfolio_account(text, text, text, boolean) to service_role;
+
 insert into settings(key,value) values
   ('contact_email','contact@trishulcapital.com'),
   ('contact_whatsapp',''),
