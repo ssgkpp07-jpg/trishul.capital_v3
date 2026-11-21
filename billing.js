@@ -251,6 +251,19 @@ export function formatBillingInvoiceNumber(year, month, sequence) {
   return `INV-TC-${String(sequence).padStart(3, '0')}/${String(month).padStart(2, '0')}/${year}`;
 }
 
+export function getNextBillingInvoiceSequence(lastSequence, reusableSequence) {
+  const last = Number(lastSequence);
+  if (!Number.isSafeInteger(last) || last < 0 || last >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('Invoice sequence is invalid.');
+  }
+  if (reusableSequence !== undefined && reusableSequence !== null) {
+    const reusable = Number(reusableSequence);
+    if (!Number.isSafeInteger(reusable) || reusable < 1) throw new Error('Reusable invoice sequence is invalid.');
+    return reusable;
+  }
+  return last + 1;
+}
+
 function validateBillingInvoiceNumber(invoiceNumber, issueDate) {
   const match = /^INV-TC-\d{3,}\/(\d{2})\/(\d{4})$/.exec(String(invoiceNumber || ''));
   if (!match || !validIsoDate(String(issueDate || ''))
