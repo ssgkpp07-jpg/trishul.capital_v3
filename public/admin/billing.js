@@ -3,6 +3,7 @@
   styles.textContent = `
     #billingPanel{padding:0}
     .billing-summary,.billing-settings-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0 24px}
+    .billing-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
     .billing-card{padding:16px;border:1px solid #252e3a;border-radius:9px;background:#11161f}
     .billing-card span{display:block;color:#91a0b7;font-size:12px}
     .billing-card strong{display:block;margin-top:10px;color:#efc24c;font-size:20px;font-variant-numeric:tabular-nums}
@@ -70,8 +71,8 @@
     <div id="billingMsg" class="notice hidden" role="status"></div>
     <section class="billing-view" data-billing-view="overview">
       <div id="billingSummary" class="billing-summary" aria-live="polite"></div>
-      <div class="bar"><div><h3>Monthly server billing</h3><p class="muted">Cycles start one month after onboarding. Anniversary dates beyond a month’s last day are clamped to that month’s end.</p></div></div>
-      <p class="billing-table-note">A server-fee invoice is created only when you choose Generate invoice. The fee is configured globally in Invoice Settings.</p>
+      <div class="bar"><div><h3>Monthly server billing</h3><p class="muted">Fees are due seven days before each monthly onboarding-date anniversary. Anniversary dates beyond a month’s last day are clamped to that month’s end.</p></div></div>
+      <p class="billing-table-note">A server-fee invoice is created only when you choose Generate invoice. Enabled accounts remain listed even before you set the global fee in Invoice Settings.</p>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
         <thead><tr><th>Due date</th><th>Client</th><th>Account number(s)</th><th>Amount (USD)</th><th>INR estimate</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="billingScheduleRows"><tr><td colspan="7">Loading server billing…</td></tr></tbody>
@@ -310,28 +311,36 @@
 
   function renderBillingSummary() {
     const upcoming = serverCycles.filter(cycle => cycle.status === 'upcoming');
-    const pending = serverCycles.filter(cycle => cycle.status === 'pending');
-    const settled = serverCycles.filter(cycle => cycle.status === 'settled');
+    const serverInvoices = auditInvoices.filter(invoice => invoice.billing_type === 'server_fee');
+    const pendingServer = serverInvoices.filter(invoice => invoice.payment_status !== 'paid');
+    const settledServer = serverInvoices.filter(invoice => invoice.payment_status === 'paid');
+    const profitInvoices = auditInvoices.filter(invoice => invoice.billing_type !== 'server_fee' && Number(invoice.profit_share_amount || 0) > 0);
+    const pendingProfit = profitInvoices.filter(invoice => invoice.payment_status !== 'paid');
+    const settledProfit = profitInvoices.filter(invoice => invoice.payment_status === 'paid');
+    const serverInvoiceUsd = invoice => {
+      const lines = Array.isArray(invoice.custom_line_items) ? invoice.custom_line_items : [];
+      return lines.reduce((sum, line) => sum + Number(line.amount_usd || 0), 0);
+    };
     const total = auditInvoices.reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
     document.getElementById('billingSummary').innerHTML = [
       ['Upcoming server fees', `${upcoming.length} · ${moneyUsd(upcoming.reduce((sum, cycle) => sum + Number(cycle.amount_usd || 0), 0))}`],
-      ['Pending server invoices', `${pending.length} · ${moneyUsd(pending.reduce((sum, cycle) => sum + Number(cycle.amount_usd || 0), 0))}`],
-      ['Settled server fees', `${settled.length} · ${moneyUsd(settled.reduce((sum, cycle) => sum + Number(cycle.amount_usd || 0), 0))}`],
+      ['Pending server invoices', `${pendingServer.length} · ${moneyUsd(pendingServer.reduce((sum, invoice) => sum + serverInvoiceUsd(invoice), 0))}`],
+      ['Settled server fees', `${settledServer.length} · ${moneyUsd(settledServer.reduce((sum, invoice) => sum + serverInvoiceUsd(invoice), 0))}`],
+      ['Pending profit split invoices', `${pendingProfit.length} · ${moneyInr(pendingProfit.reduce((sum, invoice) => sum + Number(invoice.profit_share_amount || 0), 0))}`],
+      ['Settled profit split invoices', `${settledProfit.length} · ${moneyInr(settledProfit.reduce((sum, invoice) => sum + Number(invoice.profit_share_amount || 0), 0))}`],
       ['Invoices · total', `${auditInvoices.length} · ${moneyInr(total)}`]
     ].map(([label, value]) => `<div class="billing-card"><span>${label}</span><strong>${value}</strong></div>`).join('');
-    document.getElementById('billingSummary').setAttribute('aria-label', `Server billing summary. ${upcoming.length} upcoming, ${pending.length} pending, ${settled.length} settled cycles.`);
+    document.getElementById('billingSummary').setAttribute('aria-label', `Billing summary. ${upcoming.length} upcoming server fees, ${pendingServer.length} pending server invoices, ${settledServer.length} settled server invoices, ${pendingProfit.length} pending profit split invoices, and ${settledProfit.length} settled profit split invoices.`);
   }
 
   function renderBillingSchedule() {
     const rows = document.getElementById('billingScheduleRows');
-    if (!Number(billingSettings.monthly_server_fee_usd)) {
-      rows.innerHTML = '<tr><td colspan="7">Set the global monthly server fee in Invoice Settings to begin tracking server costs.</td></tr>';
-      return;
-    }
     rows.innerHTML = serverCycles.map(cycle => {
       const action = cycle.invoice_id
         ? `<button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(cycle.invoice_id)})">Preview invoice</button>`
-        : `<button type="button" class="portfolio-action" onclick="generateServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${cycle.due_date}')">Generate invoice</button>`;
+        : Number(billingSettings.monthly_server_fee_usd) > 0
+          ? `<button type="button" class="portfolio-action" onclick="generateServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${cycle.due_date}')">Generate invoice</button>`
+          : '<button type="button" class="portfolio-action" disabled title="Set the monthly server fee in Invoice Settings first">Set fee first</button>';
       return `<tr>
         <td>${escapeHtml(cycle.due_date)}${cycle.overdue && cycle.status === 'upcoming' ? '<br><span class="billing-error">Due</span>' : ''}</td>
         <td>${escapeHtml(cycle.client_id)} · ${escapeHtml(cycle.client_name)}<br><span class="muted">${escapeHtml(cycle.client_email || cycle.client_phone || '')}</span></td>
