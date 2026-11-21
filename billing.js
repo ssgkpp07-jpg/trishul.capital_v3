@@ -1,11 +1,81 @@
 import { randomUUID } from 'node:crypto';
 import PDFDocument from 'pdfkit';
-import nodemailer from 'nodemailer';
 
 const roundMoney = amount => Math.round((amount + Number.EPSILON) * 100) / 100;
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-})[character]);
+const BILLING_SETTING_FIELDS = [
+  'logo_data_url', 'upi_id', 'upi_qr_data_url', 'bank_account_number', 'bank_account_name',
+  'bank_name', 'bank_branch', 'bank_ifsc', 'company_name', 'company_address',
+  'company_phone', 'company_email', 'monthly_server_fee_usd', 'usd_inr_rate'
+];
+const IMAGE_SIGNATURES = {
+  'image/png': buffer => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/jpeg': buffer => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+};
+const MAX_BILLING_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const validIsoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+
+export function getDefaultBillingSettings() {
+  return {
+    logo_data_url: '',
+    upi_id: process.env.COMPANY_UPI_ID || '',
+    upi_qr_data_url: '',
+    bank_account_number: '',
+    bank_account_name: '',
+    bank_name: '',
+    bank_branch: '',
+    bank_ifsc: '',
+    company_name: process.env.COMPANY_NAME || 'Trishul Capital',
+    company_address: process.env.COMPANY_ADDRESS || '',
+    company_phone: process.env.COMPANY_PHONE || '',
+    company_email: process.env.COMPANY_EMAIL || process.env.SMTP_USER || '',
+    monthly_server_fee_usd: 0,
+    usd_inr_rate: 0
+  };
+}
+
+export function normalizeBillingSettings(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invoice settings must be an object.');
+  const defaults = getDefaultBillingSettings();
+  const result = {};
+  for (const field of BILLING_SETTING_FIELDS) {
+    const value = input[field] ?? defaults[field];
+    if (field.endsWith('_data_url')) {
+      if (typeof value !== 'string' || value.length > Math.ceil(MAX_BILLING_IMAGE_BYTES * 4 / 3) + 128) {
+        throw new Error(`${field.replace(/_/g, ' ')} is too large.`);
+      }
+      if (!value) {
+        result[field] = '';
+        continue;
+      }
+      const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+      if (!match) throw new Error('Invoice logo and UPI QR must be PNG or JPEG images.');
+      const buffer = Buffer.from(match[2], 'base64');
+      if (!buffer.length || buffer.length > MAX_BILLING_IMAGE_BYTES
+        || buffer.toString('base64') !== match[2] || !IMAGE_SIGNATURES[match[1]](buffer)) {
+        throw new Error('Invoice logo and UPI QR must be valid PNG or JPEG images no larger than 2 MB.');
+      }
+      result[field] = value;
+      continue;
+    }
+    if (field === 'monthly_server_fee_usd' || field === 'usd_inr_rate') {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0 || (field === 'usd_inr_rate' && number > 0 && number > 100000)) {
+        throw new Error(`${field === 'monthly_server_fee_usd' ? 'Monthly server fee' : 'USD to INR rate'} must be a non-negative number.`);
+      }
+      result[field] = roundMoney(number);
+      continue;
+    }
+    if (typeof value !== 'string' || value.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)) {
+      throw new Error(`${field.replace(/_/g, ' ')} must be text with no more than 1,000 characters.`);
+    }
+    result[field] = value.trim();
+  }
+  if (result.company_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.company_email)) {
+    throw new Error('Enter a valid company email address.');
+  }
+  return result;
+}
 
 export function getBillingPeriodDates(input) {
   const year = Number(input.year);
@@ -24,6 +94,90 @@ export function getBillingPeriodDates(input) {
   return { periodStart: date(startDay), periodEnd: date(endDay) };
 }
 
+export function getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding) {
+  if (!validIsoDate(String(onboardDate || '')) || !Number.isInteger(monthsAfterOnboarding) || monthsAfterOnboarding < 1) {
+    throw new Error('A valid onboarding date and positive billing month are required.');
+  }
+  const [year, month, day] = onboardDate.split('-').map(Number);
+  const monthIndex = year * 12 + month - 1 + monthsAfterOnboarding;
+  const targetYear = Math.floor(monthIndex / 12);
+  const targetMonth = monthIndex % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+export function getServerBillingCycles(onboardDate, today = new Date().toISOString().slice(0, 10)) {
+  if (!validIsoDate(String(today || ''))) throw new Error('A valid current date is required.');
+  if (!validIsoDate(String(onboardDate || ''))) throw new Error('A valid onboarding date is required.');
+  const [onboardYear, onboardMonth] = onboardDate.split('-').map(Number);
+  const [todayYear, todayMonth] = today.split('-').map(Number);
+  const monthDifference = (todayYear - onboardYear) * 12 + todayMonth - onboardMonth;
+  const maximumOffset = Math.max(1, monthDifference + 2);
+  const cycles = [];
+  for (let offset = 1; offset <= maximumOffset; offset += 1) {
+    const dueDate = getMonthlyAnniversaryDate(onboardDate, offset);
+    cycles.push({ due_date: dueDate, overdue: dueDate <= today });
+    if (dueDate > today) break;
+  }
+  return cycles;
+}
+
+export function buildServerBillingSchedule({ events, activeAccounts, invoices, clients, settings, today }) {
+  const clientById = new Map((clients || []).map(client => [String(client.client_id || '').toUpperCase(), client]));
+  const invoiceByCycle = new Map((invoices || [])
+    .filter(invoice => invoice.billing_type === 'server_fee' && !invoice.deleted_at)
+    .map(invoice => [`${String(invoice.client_id).toUpperCase()}\u0000${invoice.server_billing_due_date}`, invoice]));
+  const groups = new Map();
+  if (Number(settings.monthly_server_fee_usd) > 0) {
+    for (const account of activeAccounts || []) {
+      const clientId = String(account.client_id || '').toUpperCase();
+      const accountNumber = String(account.account_number || '');
+      if (!clientId || !accountNumber) continue;
+      const accountEvents = (events || [])
+        .filter(event => !event.deleted_at && String(event.client_id || '').toUpperCase() === clientId && String(event.account_number || '') === accountNumber)
+        .sort((left, right) => new Date(left.created_at) - new Date(right.created_at) || Number(left.id) - Number(right.id));
+      let onboarding = null;
+      for (const event of accountEvents) {
+        if (event.event_type === 'offboarded') onboarding = null;
+        else if (event.event_type === 'onboarded') onboarding = event;
+      }
+      if (!onboarding || Number(onboarding.server_billing_enabled) !== 1) continue;
+      const client = clientById.get(clientId);
+      if (!client || client.deleted_at) continue;
+      const onboardingDate = onboarding.server_billing_onboarding_date || String(onboarding.created_at).slice(0, 10);
+      for (const cycle of getServerBillingCycles(String(onboardingDate).slice(0, 10), today)) {
+        const key = `${clientId}\u0000${cycle.due_date}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            client_id: clientId,
+            client_name: `${client.first_name || ''} ${client.second_name || ''}`.trim() || account.client_name,
+            account_numbers: [],
+            due_date: cycle.due_date,
+            overdue: cycle.overdue
+          });
+        }
+        groups.get(key).account_numbers.push(accountNumber);
+      }
+    }
+  }
+  return [...groups.values()].map(group => {
+    group.account_numbers = [...new Set(group.account_numbers)].sort();
+    const invoice = invoiceByCycle.get(`${group.client_id}\u0000${group.due_date}`) || null;
+    return {
+      ...group,
+      amount_usd: roundMoney(Number(settings.monthly_server_fee_usd) * group.account_numbers.length),
+      amount_inr: invoice
+        ? Number(invoice.amount)
+        : roundMoney(Number(settings.monthly_server_fee_usd) * group.account_numbers.length * Number(settings.usd_inr_rate)),
+      status: invoice ? (invoice.payment_status === 'paid' ? 'settled' : 'pending') : 'upcoming',
+      invoice_id: invoice?.id || null,
+      invoice_number: invoice?.invoice_number || null,
+      client_email: clientById.get(group.client_id)?.email || '',
+      client_phone: clientById.get(group.client_id)?.whatsapp_number || ''
+    };
+  }).sort((left, right) => left.due_date.localeCompare(right.due_date) || left.client_name.localeCompare(right.client_name));
+}
+
 export function calculateBillingAmounts(input, maintenanceAlreadyCharged = false) {
   const withdrawalProfitUsd = Number(input.withdrawal_profit_usd);
   const profitSplitPercent = Number(input.profit_split_percent);
@@ -34,7 +188,7 @@ export function calculateBillingAmounts(input, maintenanceAlreadyCharged = false
   if (!Number.isFinite(requestedMaintenanceUsd) || requestedMaintenanceUsd < 0) throw new Error('Server maintenance must be a non-negative USD amount.');
   if (!Number.isFinite(usdInrRate) || usdInrRate <= 0) throw new Error('Enter a valid USD/INR exchange rate.');
   const customLines = input.custom_line_items ?? [];
-  if (!Array.isArray(customLines) || customLines.length > 20) throw new Error('Add no more than 20 custom invoice lines.');
+  if (!Array.isArray(customLines) || customLines.length > 50) throw new Error('Add no more than 50 custom invoice lines.');
 
   const withdrawal = roundMoney(withdrawalProfitUsd);
   const profitShareUsd = roundMoney(withdrawal * profitSplitPercent / 100);
@@ -67,31 +221,92 @@ export function calculateBillingAmounts(input, maintenanceAlreadyCharged = false
   };
 }
 
-export function createBillingInvoice(client, input, maintenanceAlreadyCharged = false) {
-  const clientEmail = String(client.email || '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) throw new Error('Add a valid email address to this client in Client Registration before creating an invoice.');
-  const accountNumber = String(input.account_number || '').trim();
-  if (!accountNumber || accountNumber.length > 100) throw new Error('Choose a valid portfolio account number.');
-  const { periodStart, periodEnd } = getBillingPeriodDates(input);
-  const amounts = calculateBillingAmounts(input, maintenanceAlreadyCharged);
+function createInvoiceNumber() {
+  const now = new Date();
+  return `TC-${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}-${randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
+function clientInvoiceDetails(client) {
   const clientName = `${client.first_name || ''} ${client.second_name || ''}`.trim();
   const clientAddress = [
     client.address_line1, client.address_line2, client.city, client.state, client.country, client.pincode
   ].filter(Boolean).join(', ');
-  const now = new Date();
   return {
-    invoice_number: `TC-${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}-${randomUUID().slice(0, 8).toUpperCase()}`,
     client_id: String(client.client_id),
-    account_number: accountNumber,
-    client_name: clientName,
-    client_email: clientEmail,
+    client_name: clientName || 'Client',
+    client_email: String(client.email || '').trim().toLowerCase(),
     client_phone: String(client.whatsapp_number || ''),
-    client_address: clientAddress,
-    issue_date: now.toISOString().slice(0, 10),
+    client_address: clientAddress
+  };
+}
+
+export function createBillingInvoice(client, input, maintenanceAlreadyCharged = false, settings = getDefaultBillingSettings()) {
+  const accountNumber = String(input.account_number || '').trim();
+  if (!accountNumber || accountNumber.length > 100) throw new Error('Choose a valid portfolio account number.');
+  const { periodStart, periodEnd } = getBillingPeriodDates(input);
+  const amounts = calculateBillingAmounts(input, maintenanceAlreadyCharged);
+  return {
+    invoice_number: createInvoiceNumber(),
+    ...clientInvoiceDetails(client),
+    account_number: accountNumber,
+    issue_date: new Date().toISOString().slice(0, 10),
     due_date: periodEnd,
     period_type: input.period_type,
     period_start: periodStart,
     period_end: periodEnd,
+    billing_type: 'standard',
+    server_billing_due_date: null,
+    invoice_settings: normalizeBillingSettings(settings),
+    payment_status: 'pending',
+    paid_at: null,
+    payment_method: null,
+    payment_reference: null,
+    deleted_at: null,
+    ...amounts,
+    status: 'email_failed',
+    emailed_at: null
+  };
+}
+
+export function createServerBillingInvoice(client, dueDate, accountNumbers, settings) {
+  const normalizedSettings = normalizeBillingSettings(settings);
+  if (!validIsoDate(String(dueDate || ''))) throw new Error('Choose a valid server billing due date.');
+  const accounts = [...new Set((accountNumbers || []).map(value => String(value || '').trim()).filter(Boolean))].sort();
+  if (!accounts.length || accounts.length > 50 || accounts.some(value => value.length > 100)) {
+    throw new Error('The server billing invoice needs 1–50 valid account numbers.');
+  }
+  if (normalizedSettings.monthly_server_fee_usd <= 0) throw new Error('Set a monthly server fee greater than zero in Invoice Settings.');
+  if (normalizedSettings.usd_inr_rate <= 0) throw new Error('Set a USD to INR rate in Invoice Settings before generating server invoices.');
+  const [year, month] = dueDate.split('-').map(Number);
+  const { periodStart, periodEnd } = getBillingPeriodDates({ period_type: 'monthly', year, month });
+  const feeLines = accounts.map(accountNumber => ({
+    description: `Monthly server fee · Account ${accountNumber} · Due ${dueDate}`,
+    amount_usd: normalizedSettings.monthly_server_fee_usd
+  }));
+  const amounts = calculateBillingAmounts({
+    withdrawal_profit_usd: 0,
+    profit_split_percent: 0,
+    server_maintenance_usd: 0,
+    usd_inr_rate: normalizedSettings.usd_inr_rate,
+    custom_line_items: feeLines
+  });
+  return {
+    invoice_number: createInvoiceNumber(),
+    ...clientInvoiceDetails(client),
+    account_number: accounts.join(', '),
+    issue_date: new Date().toISOString().slice(0, 10),
+    due_date: dueDate,
+    period_type: 'monthly',
+    period_start: periodStart,
+    period_end: periodEnd,
+    billing_type: 'server_fee',
+    server_billing_due_date: dueDate,
+    invoice_settings: normalizedSettings,
+    payment_status: 'pending',
+    paid_at: null,
+    payment_method: null,
+    payment_reference: null,
+    deleted_at: null,
     ...amounts,
     status: 'email_failed',
     emailed_at: null
@@ -112,7 +327,7 @@ function invoiceLines(invoice) {
     });
   }
   if (Number(invoice.server_maintenance_amount) > 0) {
-    lines.push({ description: `Server maintenance (USD ${Number(invoice.server_maintenance_usd).toFixed(2)})`, amount: Number(invoice.server_maintenance_amount) });
+    lines.push({ description: `Server maintenance · Account ${invoice.account_number} (USD ${Number(invoice.server_maintenance_usd).toFixed(2)})`, amount: Number(invoice.server_maintenance_amount) });
   }
   for (const item of Array.isArray(custom) ? custom : []) {
     lines.push({ description: `${item.description} (USD ${Number(item.amount_usd).toFixed(2)})`, amount: Number(item.amount_inr) });
@@ -120,102 +335,135 @@ function invoiceLines(invoice) {
   return lines;
 }
 
+function invoiceSettings(invoice) {
+  let source = invoice.invoice_settings || {};
+  if (typeof source === 'string') {
+    try { source = JSON.parse(source); } catch { source = {}; }
+  }
+  return normalizeBillingSettings(source);
+}
+
+function imageBuffer(dataUrl) {
+  if (!dataUrl) return null;
+  const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
+  if (!match) throw new Error('A saved invoice image is invalid.');
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!IMAGE_SIGNATURES[match[1]](buffer)) throw new Error('A saved invoice image is invalid.');
+  return buffer;
+}
+
 export function createBillingPdf(invoice) {
   return new Promise((resolve, reject) => {
+    let settings;
+    try { settings = invoiceSettings(invoice); } catch (error) { reject(error); return; }
     const document = new PDFDocument({ size: 'A4', margin: 48 });
     const chunks = [];
     document.on('data', chunk => chunks.push(chunk));
     document.on('end', () => resolve(Buffer.concat(chunks)));
     document.on('error', reject);
 
-    const company = process.env.COMPANY_NAME || 'Trishul Capital';
-    const companyEmail = process.env.COMPANY_EMAIL || process.env.SMTP_USER || '';
-    document.fillColor('#171717').fontSize(20).text(company, 48, 48);
-    document.fillColor('#555').fontSize(9).text(
-      [process.env.COMPANY_ADDRESS, companyEmail, process.env.COMPANY_PHONE].filter(Boolean).join('  |  '),
-      48, 76, { width: 500 }
-    );
-    document.moveTo(48, 112).lineTo(547, 112).strokeColor('#d6ad43').lineWidth(2).stroke();
-    document.fillColor('#171717').fontSize(22).text('INVOICE', 48, 130);
-    document.fontSize(10).text(`Invoice number: ${invoice.invoice_number}`, 48, 164);
-    document.text(`Issue date: ${invoice.issue_date}`, 48, 180);
-    document.text(`Due date: ${invoice.due_date}`, 48, 196);
-    document.text(`Billing period: ${invoice.period_type} · ${invoice.period_start} to ${invoice.period_end}`, 48, 212);
-    document.text(`Account number: ${invoice.account_number}`, 48, 228);
+    const left = 48;
+    const right = document.page.width - 48;
+    const contentWidth = right - left;
+    const logo = imageBuffer(settings.logo_data_url);
+    if (logo) document.image(logo, left, 38, { fit: [135, 72], align: 'left', valign: 'center' });
+    else document.fillColor('#171717').font('Helvetica-Bold').fontSize(20).text(settings.company_name, left, 54, { width: 145 });
+    document.fillColor('#222').font('Helvetica-Bold').fontSize(15)
+      .text(settings.company_name, 270, 42, { width: right - 270, align: 'right' });
+    document.font('Helvetica').fillColor('#555').fontSize(8)
+      .text([settings.company_address, settings.company_phone, settings.company_email].filter(Boolean).join('\n'), 270, 62, {
+        width: right - 270, align: 'right', lineGap: 2
+      });
 
-    document.fillColor('#777').fontSize(9).text('BILLED TO', 48, 250);
-    document.fillColor('#171717').fontSize(12).text(invoice.client_name, 48, 266);
-    document.fillColor('#555').fontSize(9).text(
+    if (invoice.payment_status === 'paid') {
+      document.save();
+      document.rotate(-35, { origin: [right - 55, 62] });
+      document.fillColor('#eaf6ed').rect(right - 115, 36, 112, 24).fill();
+      document.fillColor('#24743a').font('Helvetica-Bold').fontSize(13).text('PAID', right - 102, 41, { width: 84, align: 'center' });
+      document.restore();
+    }
+
+    document.rect(left, 127, contentWidth, 48).fill('#f0f1f3');
+    document.fillColor('#202632').font('Helvetica-Bold').fontSize(16).text('INVOICE', left + 14, 139);
+    document.font('Helvetica').fontSize(8).fillColor('#3f4651')
+      .text(`Invoice number: ${invoice.invoice_number}`, left + 110, 137, { width: 205 })
+      .text(`Issue date: ${invoice.issue_date}`, left + 110, 151, { width: 205 })
+      .text(`Due date: ${invoice.due_date}`, 355, 137, { width: 175, align: 'right' })
+      .text(`Account: ${invoice.account_number || '—'}`, 355, 151, { width: 175, align: 'right' });
+
+    document.fillColor('#666').font('Helvetica-Bold').fontSize(8).text('BILLED TO', left, 195);
+    document.fillColor('#171717').font('Helvetica-Bold').fontSize(12).text(invoice.client_name, left, 209, { width: contentWidth });
+    document.font('Helvetica').fillColor('#555').fontSize(8).text(
       [invoice.client_id, invoice.client_address, invoice.client_phone, invoice.client_email].filter(Boolean).join('\n'),
-      48, 284, { width: 320, lineGap: 3 }
+      left, 226, { width: 330, lineGap: 2 }
     );
 
-    const headerY = Math.max(document.y + 24, 350);
-    document.rect(48, headerY, 499, 25).fill('#f0f1f3');
-    document.fillColor('#343434').fontSize(9).text('DESCRIPTION', 58, headerY + 8);
-    document.text('AMOUNT (INR)', 420, headerY + 8, { width: 117, align: 'right' });
-    let rowY = headerY + 38;
-    for (const line of invoiceLines(invoice)) {
-      document.fillColor('#222').fontSize(9).text(line.description, 58, rowY, { width: 340 });
-      document.text(`INR ${Number(line.amount).toFixed(2)}`, 410, rowY, { width: 127, align: 'right' });
-      rowY = Math.max(document.y, rowY + 16) + 10;
-      if (rowY > 690) {
+    let rowY = Math.max(document.y + 20, 286);
+    const drawTableHeader = y => {
+      document.rect(left, y, contentWidth, 25).fill('#e9ebee');
+      document.fillColor('#303741').font('Helvetica-Bold').fontSize(8).text('DESCRIPTION', left + 10, y + 8);
+      document.text('AMOUNT (INR)', right - 137, y + 8, { width: 127, align: 'right' });
+    };
+    drawTableHeader(rowY);
+    rowY += 34;
+    const lines = invoiceLines(invoice);
+    if (!lines.length) lines.push({ description: 'Services', amount: Number(invoice.amount || 0) });
+    for (const line of lines) {
+      const descriptionHeight = document.heightOfString(line.description, { width: 340, font: 'Helvetica', fontSize: 8, lineGap: 2 });
+      if (rowY + descriptionHeight + 20 > 690) {
         document.addPage();
-        rowY = 60;
+        rowY = 54;
+        drawTableHeader(rowY);
+        rowY += 34;
       }
-      document.moveTo(48, rowY).lineTo(547, rowY).strokeColor('#e2e4e8').lineWidth(0.5).stroke();
-      rowY += 12;
+      document.fillColor('#222').font('Helvetica').fontSize(8).text(line.description, left + 10, rowY, { width: 340, lineGap: 2 });
+      document.text(`INR ${Number(line.amount).toFixed(2)}`, right - 137, rowY, { width: 127, align: 'right' });
+      rowY += Math.max(descriptionHeight, 12) + 12;
+      document.moveTo(left, rowY).lineTo(right, rowY).strokeColor('#e1e3e7').lineWidth(0.5).stroke();
+      rowY += 10;
     }
-    document.fillColor('#555').fontSize(9).text(`Exchange rate: USD 1 = INR ${Number(invoice.usd_inr_rate).toFixed(4)}`, 300, rowY, { width: 237, align: 'right' });
-    rowY += 22;
-    document.rect(300, rowY, 247, 30).fill('#f0f1f3');
-    document.fillColor('#171717').fontSize(11).text('TOTAL DUE (INR)', 310, rowY + 9);
-    document.text(`INR ${Number(invoice.amount).toFixed(2)}`, 420, rowY + 9, { width: 117, align: 'right' });
-    if (process.env.COMPANY_UPI_ID) {
-      document.fillColor('#555').fontSize(9).text(`UPI ID: ${process.env.COMPANY_UPI_ID}`, 48, rowY + 48);
+    if (rowY + 45 > 700) {
+      document.addPage();
+      rowY = 55;
     }
-    document.fillColor('#777').fontSize(8).text(
-      'Please use the invoice number as your payment reference. This invoice is not a GST tax invoice unless applicable tax details are separately stated.',
-      48, 748, { width: 499, align: 'center' }
-    );
-    document.end();
-  });
-}
+    document.fillColor('#555').font('Helvetica').fontSize(8)
+      .text(`Exchange rate: USD 1 = INR ${Number(invoice.usd_inr_rate).toFixed(4)}`, left, rowY + 4, { width: contentWidth, align: 'right' });
+    rowY += 21;
+    document.rect(right - 247, rowY, 247, 31).fill('#f0f1f3');
+    document.fillColor('#171717').font('Helvetica-Bold').fontSize(10).text('TOTAL DUE (INR)', right - 237, rowY + 10);
+    document.text(`INR ${Number(invoice.amount).toFixed(2)}`, right - 137, rowY + 10, { width: 127, align: 'right' });
+    rowY += 45;
 
-export async function sendBillingInvoiceEmail(invoice, pdf) {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!host || !user || !pass || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('Invoice email is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS on the backend.');
-  }
-  const company = process.env.COMPANY_NAME || 'Trishul Capital';
-  const from = process.env.SMTP_FROM || `${company} <${user}>`;
-  const transport = nodemailer.createTransport({
-    host,
-    port,
-    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
-    auth: { user, pass }
-  });
-  const total = `INR ${Number(invoice.amount).toFixed(2)}`;
-  const lines = invoiceLines(invoice).map(line => `<li>${escapeHtml(line.description)} — INR ${Number(line.amount).toFixed(2)}</li>`).join('');
-  return transport.sendMail({
-    from,
-    to: invoice.client_email,
-    subject: `Invoice ${invoice.invoice_number} - Account ${invoice.account_number} from ${company}`,
-    text: [
-      `Hello ${invoice.client_name},`,
-      '',
-      `Please find attached invoice ${invoice.invoice_number} for ${total}.`,
-      `Account number: ${invoice.account_number}`,
-      `Billing period: ${invoice.period_start} to ${invoice.period_end}`,
-      `Due date: ${invoice.due_date}`,
-      '',
-      `Regards,`,
-      company
-    ].join('\n'),
-    html: `<p>Hello ${escapeHtml(invoice.client_name)},</p><p>Please find attached invoice <strong>${escapeHtml(invoice.invoice_number)}</strong> for <strong>${total}</strong>.</p><p>Account number: ${escapeHtml(invoice.account_number)}<br>Billing period: ${escapeHtml(invoice.period_start)} to ${escapeHtml(invoice.period_end)}<br>Due date: ${escapeHtml(invoice.due_date)}</p><ul>${lines}</ul><p>Regards,<br>${escapeHtml(company)}</p>`,
-    attachments: [{ filename: `${invoice.invoice_number}.pdf`, content: pdf, contentType: 'application/pdf' }]
+    const qr = imageBuffer(settings.upi_qr_data_url);
+    if (rowY > 690) {
+      document.addPage();
+      rowY = 55;
+    }
+    document.fillColor('#4b515a').font('Helvetica-Bold').fontSize(8).text('PAYMENT DETAILS', left, rowY);
+    rowY += 15;
+    if (qr) document.image(qr, left, rowY, { fit: [90, 90] });
+    const bankDetails = [
+      settings.upi_id ? `UPI ID: ${settings.upi_id}` : '',
+      settings.bank_account_name ? `Account name: ${settings.bank_account_name}` : '',
+      settings.bank_account_number ? `Account number: ${settings.bank_account_number}` : '',
+      settings.bank_name ? `Bank: ${settings.bank_name}` : '',
+      settings.bank_branch ? `Branch: ${settings.bank_branch}` : '',
+      settings.bank_ifsc ? `IFSC: ${settings.bank_ifsc}` : ''
+    ].filter(Boolean);
+    document.font('Helvetica').fillColor('#333').fontSize(8).text(
+      bankDetails.length ? bankDetails.join('\n') : 'Contact us for payment instructions.',
+      qr ? left + 105 : left, rowY + 2, { width: qr ? 300 : contentWidth, lineGap: 4 }
+    );
+    if (invoice.payment_status === 'paid') {
+      const paidDetails = ['Payment verified manually', invoice.paid_at ? `Verified on: ${String(invoice.paid_at).slice(0, 10)}` : '', invoice.payment_reference ? `Reference: ${invoice.payment_reference}` : ''].filter(Boolean).join(' · ');
+      document.fillColor('#24743a').font('Helvetica-Bold').fontSize(8)
+        .text(paidDetails, left, Math.max(rowY + 96, document.y + 10), { width: contentWidth });
+    }
+
+    const footer = 'Please use the invoice number as your payment reference. This invoice is not a GST tax invoice unless applicable tax details are separately stated.';
+    document.fillColor('#777').font('Helvetica').fontSize(7).text(footer, left, document.page.height - 55, {
+      width: contentWidth, align: 'center'
+    });
+    document.end();
   });
 }
