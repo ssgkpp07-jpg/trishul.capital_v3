@@ -6,8 +6,8 @@
     .billing-card{padding:16px;border:1px solid #252e3a;border-radius:9px;background:#11161f}
     .billing-card span{display:block;color:#91a0b7;font-size:12px}
     .billing-card strong{display:block;margin-top:10px;color:#efc24c;font-size:20px;font-variant-numeric:tabular-nums}
-    .billing-subnav{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0;border-bottom:1px solid #29313d}
-    .billing-subnav button{background:transparent;color:#aab7ca;border:0;border-bottom:2px solid transparent;border-radius:0}
+    .billing-subnav{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;margin:18px 0;border-bottom:1px solid #29313d}
+    .billing-subnav button{width:auto;flex:0 0 auto;white-space:nowrap;margin:0;padding:12px 16px;background:transparent;color:#aab7ca;border:0;border-bottom:2px solid transparent;border-radius:0}
     .billing-subnav button.active{color:#f0c95e;border-bottom-color:#d8b143}
     .billing-form,.billing-settings-grid{align-items:end}
     .billing-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
@@ -544,7 +544,7 @@
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${invoiceNumber}.pdf`;
+      link.download = `${String(invoiceNumber).replace(/[\\/]/g, '-')}.pdf`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -733,6 +733,7 @@
     await originalLoadPermanentDelete();
     await loadDeletedInvoices();
   };
+  window.refreshBillingAccounts = loadBilling;
 
   window.loadBilling = loadBilling;
   window.previewBillingPdf = previewBillingPdf;
