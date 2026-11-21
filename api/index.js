@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
-import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, createServerBillingInvoice, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
+import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
@@ -216,34 +216,69 @@ export default async function handler(req, res) {
         if (accountError) throw accountError;
         if (!registeredAccount) return res.status(404).json({ message: 'Choose an account number linked to this registered client in Portfolio.' });
 
+        const scheduledDueDate = String(input.server_billing_due_date || '').trim();
+        let monthInvoices = [];
+        if (scheduledDueDate) {
+          const parsedDueDate = new Date(`${scheduledDueDate}T00:00:00.000Z`);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate) || Number.isNaN(parsedDueDate.getTime()) || parsedDueDate.toISOString().slice(0, 10) !== scheduledDueDate) {
+            return res.status(400).json({ message: 'Choose a valid server billing due date.' });
+          }
+          const [portfolio, invoiceResult] = await Promise.all([
+            getPortfolio(),
+            supabase.from('billing_invoices').select('*').eq('billing_type', 'server_fee').is('deleted_at', null)
+          ]);
+          if (invoiceResult.error) throw invoiceResult.error;
+          const cycle = buildServerBillingSchedule({
+            events: portfolio.events,
+            activeAccounts: portfolio.active_accounts,
+            invoices: invoiceResult.data || [],
+            clients: [client],
+            settings: {},
+            today: new Date().toISOString().slice(0, 10)
+          }).find(item => item.client_id === clientId && item.due_date === scheduledDueDate && item.account_numbers.includes(accountNumber));
+          if (!cycle) return res.status(400).json({ message: 'This account does not have an enabled server billing cycle for that due date.' });
+          if (cycle.invoice_id) return res.status(409).json({ message: 'An invoice already exists for this account and server billing cycle.' });
+        }
+
         let period;
         try { period = getBillingPeriodDates(input); } catch (error) {
           return res.status(400).json({ message: error.message });
         }
-        const monthStart = `${period.periodStart.slice(0, 7)}-01`;
-        const monthEndDay = new Date(Date.UTC(Number(period.periodStart.slice(0, 4)), Number(period.periodStart.slice(5, 7)), 0)).getUTCDate();
-        const monthEnd = `${period.periodStart.slice(0, 7)}-${String(monthEndDay).padStart(2, '0')}`;
-        const { data: monthInvoices, error: periodError } = await supabase.from('billing_invoices')
-          .select('period_type,period_start,server_maintenance_usd')
-          .eq('client_id', clientId).eq('billing_type', 'standard').is('deleted_at', null)
-          .gte('period_start', monthStart).lte('period_start', monthEnd);
-        if (periodError) throw periodError;
-        if ((monthInvoices || []).some(invoice => invoice.period_type !== input.period_type)) {
-          return res.status(409).json({ message: 'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.' });
-        }
-        if ((monthInvoices || []).some(invoice => invoice.period_type === input.period_type && invoice.period_start === period.periodStart)) {
-          return res.status(409).json({ message: 'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.' });
+        if (!scheduledDueDate) {
+          const monthStart = `${period.periodStart.slice(0, 7)}-01`;
+          const monthEndDay = new Date(Date.UTC(Number(period.periodStart.slice(0, 4)), Number(period.periodStart.slice(5, 7)), 0)).getUTCDate();
+          const monthEnd = `${period.periodStart.slice(0, 7)}-${String(monthEndDay).padStart(2, '0')}`;
+          const { data, error: periodError } = await supabase.from('billing_invoices')
+            .select('period_type,period_start,server_maintenance_usd')
+            .eq('client_id', clientId).eq('billing_type', 'standard').is('deleted_at', null)
+            .gte('period_start', monthStart).lte('period_start', monthEnd);
+          if (periodError) throw periodError;
+          monthInvoices = data || [];
+          if (monthInvoices.some(invoice => invoice.period_type !== input.period_type)) {
+            return res.status(409).json({ message: 'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.' });
+          }
+          if (monthInvoices.some(invoice => invoice.period_type === input.period_type && invoice.period_start === period.periodStart)) {
+            return res.status(409).json({ message: 'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.' });
+          }
         }
 
         const settings = await getBillingSettings();
         const issueDate = new Date().toISOString().slice(0, 10);
-        const invoiceNumber = await nextBillingInvoiceNumber(issueDate);
+        const [issueYear, issueMonth] = issueDate.slice(0, 7).split('-').map(Number);
         let invoice;
         try {
-          invoice = createBillingInvoice(client, input, (monthInvoices || []).some(item => Number(item.server_maintenance_usd) > 0), settings, invoiceNumber, issueDate);
+          invoice = createBillingInvoice(
+            client,
+            input,
+            !scheduledDueDate && monthInvoices.some(item => Number(item.server_maintenance_usd) > 0),
+            settings,
+            formatBillingInvoiceNumber(issueYear, issueMonth, 1),
+            issueDate
+          );
         } catch (error) {
           return res.status(400).json({ message: error.message });
         }
+        invoice.invoice_number = await nextBillingInvoiceNumber(issueDate);
         const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
         if (error?.code === '23505') return res.status(409).json({ message: 'An invoice already exists for this client and billing period.' });
         if (error) throw error;
@@ -251,41 +286,7 @@ export default async function handler(req, res) {
       }
 
       if (method === 'POST' && path === '/api/admin/billing/server-invoices') {
-        const input = bodyOf(req);
-        const clientId = String(input.client_id || '').trim().toUpperCase();
-        const dueDate = String(input.due_date || '').trim();
-        const settings = await getBillingSettings();
-        const [portfolio, invoiceResult, clientResult] = await Promise.all([
-          getPortfolio(),
-          supabase.from('billing_invoices').select('*').eq('billing_type', 'server_fee').is('deleted_at', null),
-          supabase.from('portfolio_clients').select('*').eq('client_id', clientId).is('deleted_at', null).maybeSingle()
-        ]);
-        if (invoiceResult.error) throw invoiceResult.error;
-        if (clientResult.error) throw clientResult.error;
-        const cycles = buildServerBillingSchedule({
-          events: portfolio.events,
-          activeAccounts: portfolio.active_accounts,
-          invoices: invoiceResult.data || [],
-          clients: clientResult.data ? [clientResult.data] : [],
-          settings,
-          today: new Date().toISOString().slice(0, 10)
-        });
-        const cycle = cycles.find(item => item.client_id === clientId && item.due_date === dueDate);
-        if (!cycle) return res.status(404).json({ message: 'No enabled server billing cycle was found for this client and due date.' });
-        if (cycle.invoice_id) return res.status(409).json({ message: 'An invoice already exists for this server billing cycle.' });
-        if (!clientResult.data) return res.status(404).json({ message: 'The registered client for this server billing cycle is no longer active.' });
-        const issueDate = new Date().toISOString().slice(0, 10);
-        const invoiceNumber = await nextBillingInvoiceNumber(issueDate);
-        let invoice;
-        try {
-          invoice = createServerBillingInvoice(clientResult.data, dueDate, cycle.account_numbers, settings, invoiceNumber, issueDate);
-        } catch (error) {
-          return res.status(400).json({ message: error.message });
-        }
-        const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
-        if (error?.code === '23505') return res.status(409).json({ message: 'A server fee invoice already exists for this client and due date.' });
-        if (error) throw error;
-        return res.status(201).json({ invoice: data });
+        return res.status(410).json({ message: 'Server-fee invoices are now created manually from the invoice form.' });
       }
 
       const pdfMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/pdf$/.exec(path);
@@ -655,8 +656,14 @@ export default async function handler(req, res) {
       const clientId = String(input.client_id || '').trim().toUpperCase();
       const accountNumber = String(input.account_number || '').trim();
       const newAccountNumber = String(input.new_account_number || '').trim();
+      const onboardedDate = String(input.onboarded_date || '').trim();
       if (!clientId || !accountNumber || !newAccountNumber || accountNumber.length > 100 || newAccountNumber.length > 100) {
         return res.status(400).json({ message: 'Client ID and valid old and new account numbers are required.' });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(onboardedDate)
+        || Number.isNaN(new Date(`${onboardedDate}T00:00:00.000Z`).getTime())
+        || new Date(`${onboardedDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== onboardedDate) {
+        return res.status(400).json({ message: 'Enter a valid account onboarded date.' });
       }
       if (typeof input.server_billing_enabled !== 'boolean') {
         return res.status(400).json({ message: 'Choose whether monthly server billing is enabled.' });
@@ -672,6 +679,7 @@ export default async function handler(req, res) {
         p_client_id: clientId,
         p_account_number: accountNumber,
         p_new_account_number: newAccountNumber,
+        p_onboarded_date: onboardedDate,
         p_server_billing_enabled: input.server_billing_enabled
       });
       if (error) throw error;
