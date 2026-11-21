@@ -105,6 +105,13 @@ export function getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding) {
   return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
 }
 
+export function getServerBillingDueDate(onboardDate, monthsAfterOnboarding) {
+  const anniversary = getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding);
+  const [year, month, day] = anniversary.split('-').map(Number);
+  const dueDate = new Date(Date.UTC(year, month - 1, day - 7));
+  return `${dueDate.getUTCFullYear()}-${String(dueDate.getUTCMonth() + 1).padStart(2, '0')}-${String(dueDate.getUTCDate()).padStart(2, '0')}`;
+}
+
 export function getServerBillingCycles(onboardDate, today = new Date().toISOString().slice(0, 10)) {
   if (!validIsoDate(String(today || ''))) throw new Error('A valid current date is required.');
   if (!validIsoDate(String(onboardDate || ''))) throw new Error('A valid onboarding date is required.');
@@ -114,7 +121,7 @@ export function getServerBillingCycles(onboardDate, today = new Date().toISOStri
   const maximumOffset = Math.max(1, monthDifference + 2);
   const cycles = [];
   for (let offset = 1; offset <= maximumOffset; offset += 1) {
-    const dueDate = getMonthlyAnniversaryDate(onboardDate, offset);
+    const dueDate = getServerBillingDueDate(onboardDate, offset);
     cycles.push({ due_date: dueDate, overdue: dueDate <= today });
     if (dueDate > today) break;
   }
@@ -127,36 +134,37 @@ export function buildServerBillingSchedule({ events, activeAccounts, invoices, c
     .filter(invoice => invoice.billing_type === 'server_fee' && !invoice.deleted_at)
     .map(invoice => [`${String(invoice.client_id).toUpperCase()}\u0000${invoice.server_billing_due_date}`, invoice]));
   const groups = new Map();
-  if (Number(settings.monthly_server_fee_usd) > 0) {
-    for (const account of activeAccounts || []) {
-      const clientId = String(account.client_id || '').toUpperCase();
-      const accountNumber = String(account.account_number || '');
-      if (!clientId || !accountNumber) continue;
-      const accountEvents = (events || [])
-        .filter(event => !event.deleted_at && String(event.client_id || '').toUpperCase() === clientId && String(event.account_number || '') === accountNumber)
-        .sort((left, right) => new Date(left.created_at) - new Date(right.created_at) || Number(left.id) - Number(right.id));
-      let onboarding = null;
-      for (const event of accountEvents) {
-        if (event.event_type === 'offboarded') onboarding = null;
-        else if (event.event_type === 'onboarded') onboarding = event;
+  for (const account of activeAccounts || []) {
+    const clientId = String(account.client_id || '').toUpperCase();
+    const accountNumber = String(account.account_number || '');
+    if (!clientId || !accountNumber) continue;
+    const accountEvents = (events || [])
+      .filter(event => !event.deleted_at && String(event.client_id || '').toUpperCase() === clientId && String(event.account_number || '') === accountNumber)
+      .sort((left, right) => new Date(left.created_at) - new Date(right.created_at) || Number(left.id) - Number(right.id));
+    let onboarding = null;
+    for (const event of accountEvents) {
+      if (event.event_type === 'offboarded') onboarding = null;
+      else if (event.event_type === 'onboarded') onboarding = event;
+    }
+    if (!onboarding || Number(onboarding.server_billing_enabled) !== 1) continue;
+    const client = clientById.get(clientId);
+    if (!client || client.deleted_at) continue;
+    const onboardingDate = onboarding.server_billing_onboarding_date || String(onboarding.created_at).slice(0, 10);
+    for (const [cycleIndex, cycle] of getServerBillingCycles(String(onboardingDate).slice(0, 10), today).entries()) {
+      const key = `${clientId}\u0000${cycle.due_date}`;
+      const legacyDueDate = getMonthlyAnniversaryDate(String(onboardingDate).slice(0, 10), cycleIndex + 1);
+      const legacyInvoice = invoiceByCycle.get(`${clientId}\u0000${legacyDueDate}`);
+      if (legacyInvoice && !invoiceByCycle.has(key)) invoiceByCycle.set(key, legacyInvoice);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          client_id: clientId,
+          client_name: `${client.first_name || ''} ${client.second_name || ''}`.trim() || account.client_name,
+          account_numbers: [],
+          due_date: cycle.due_date,
+          overdue: cycle.overdue
+        });
       }
-      if (!onboarding || Number(onboarding.server_billing_enabled) !== 1) continue;
-      const client = clientById.get(clientId);
-      if (!client || client.deleted_at) continue;
-      const onboardingDate = onboarding.server_billing_onboarding_date || String(onboarding.created_at).slice(0, 10);
-      for (const cycle of getServerBillingCycles(String(onboardingDate).slice(0, 10), today)) {
-        const key = `${clientId}\u0000${cycle.due_date}`;
-        if (!groups.has(key)) {
-          groups.set(key, {
-            client_id: clientId,
-            client_name: `${client.first_name || ''} ${client.second_name || ''}`.trim() || account.client_name,
-            account_numbers: [],
-            due_date: cycle.due_date,
-            overdue: cycle.overdue
-          });
-        }
-        groups.get(key).account_numbers.push(accountNumber);
-      }
+      groups.get(key).account_numbers.push(accountNumber);
     }
   }
   return [...groups.values()].map(group => {
