@@ -326,7 +326,7 @@ export default async function handler(req, res) {
         if (existingError) throw existingError;
         if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
         if (!existing.deleted_at) return res.status(409).json({ message: 'Delete the invoice first before permanent deletion.' });
-        const { data, error } = await supabase.from('billing_invoices').delete().eq('id', id).select('id').maybeSingle();
+        const { data, error } = await supabase.rpc('permanently_delete_billing_invoice', { p_invoice_id: id });
         if (error) throw error;
         if (!data) return res.status(404).json({ message: 'Invoice not found.' });
         return res.status(200).json({ ok: true });
