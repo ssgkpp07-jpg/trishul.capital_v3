@@ -6,10 +6,36 @@ import {
   createBillingInvoice,
   createBillingPdf,
   createServerBillingInvoice,
+  formatBillingInvoiceNumber,
   getBillingPeriodDates,
   getMonthlyAnniversaryDate,
-  getServerBillingCycles
+  getServerBillingCycles,
+  replaceInvoiceAccountNumber
 } from './billing.js';
+
+test('invoice numbers use a monthly sequence with a padded month and year', () => {
+  assert.equal(formatBillingInvoiceNumber(2026, 1, 1), 'INV-TC-001/01/2026');
+  assert.equal(formatBillingInvoiceNumber(2026, 12, 12), 'INV-TC-012/12/2026');
+  assert.equal(formatBillingInvoiceNumber(2026, 1, 1000), 'INV-TC-1000/01/2026');
+  assert.throws(() => formatBillingInvoiceNumber(2026, 13, 1), /invalid/);
+});
+
+test('account number edits update invoice account lists and account-specific line descriptions', () => {
+  const updated = replaceInvoiceAccountNumber({
+    account_number: 'ACC-1, ACC-10',
+    custom_line_items: [
+      { description: 'Profit share for account ACC-1' },
+      { description: 'Monthly server fee · Account ACC-1 · Due 2026-01-31' },
+      { description: 'Other charge' }
+    ]
+  }, 'ACC-1', 'NEW-1');
+  assert.equal(updated.account_number, 'NEW-1, ACC-10');
+  assert.deepEqual(updated.custom_line_items.map(line => line.description), [
+    'Profit share for account NEW-1',
+    'Monthly server fee · Account NEW-1 · Due 2026-01-31',
+    'Other charge'
+  ]);
+});
 
 test('weekly billing dates stop at the end of the selected month', () => {
   assert.deepEqual(getBillingPeriodDates({ period_type: 'weekly', year: 2024, month: 2, week: 5 }), {
@@ -53,11 +79,13 @@ test('invoice creation accepts manual WhatsApp-only sharing but requires an acco
     withdrawal_profit_usd: 100, profit_split_percent: 10,
     server_maintenance_usd: 0, usd_inr_rate: 90
   };
-  const invoice = createBillingInvoice({ ...client, whatsapp_number: '+14155552671' }, input);
+  const invoice = createBillingInvoice({ ...client, whatsapp_number: '+14155552671' }, input, false, undefined, 'INV-TC-001/11/2026', '2026-11-30');
+  assert.equal(invoice.invoice_number, 'INV-TC-001/11/2026');
   assert.equal(invoice.client_email, '');
   assert.equal(invoice.client_phone, '+14155552671');
   assert.equal(invoice.payment_status, 'pending');
   assert.throws(() => createBillingInvoice(client, { ...input, account_number: '' }), /portfolio account/);
+  assert.throws(() => createBillingInvoice(client, input, false, undefined, 'INV-TC-001/10/2026', '2026-11-30'), /matching the issue date/);
   assert.throws(() => calculateBillingAmounts({ ...input, withdrawal_profit_usd: 0 }), /greater than zero/);
 });
 
@@ -73,7 +101,7 @@ test('monthly server cycles start one month after onboarding and clamp month-end
 test('server fee invoice and schedule group same-client accounts and track settled cycles', () => {
   const client = { client_id: 'C-1', first_name: 'Sample', second_name: 'Client', email: 'sample@example.com' };
   const settings = { monthly_server_fee_usd: 25, usd_inr_rate: 80 };
-  const invoice = createServerBillingInvoice(client, '2024-02-29', ['ACC-1', 'ACC-2'], settings);
+  const invoice = createServerBillingInvoice(client, '2024-02-29', ['ACC-1', 'ACC-2'], settings, 'INV-TC-001/02/2024', '2024-02-29');
   assert.equal(invoice.billing_type, 'server_fee');
   assert.equal(invoice.amount, 4000);
   assert.match(invoice.custom_line_items[0].description, /ACC-1/);
@@ -114,7 +142,11 @@ test('invoice PDF generation returns a PDF document', async () => {
       period_type: 'monthly', year: 2026, month: 11,
       withdrawal_profit_usd: 100, profit_split_percent: 10,
       server_maintenance_usd: 0, usd_inr_rate: 90
-    }
+    },
+    false,
+    undefined,
+    'INV-TC-001/11/2026',
+    '2026-11-30'
   );
   assert.equal(invoice.account_number, 'ACC-1');
   const pdf = await createBillingPdf({
