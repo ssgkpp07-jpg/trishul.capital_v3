@@ -1,9 +1,11 @@
-import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
+import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {createBillingInvoice,createBillingPdf,getBillingPeriodDates,sendBillingInvoiceEmail} from '../billing.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
 const databasePath=process.env.DATABASE_PATH||'trishul.db',databaseDirectory=path.dirname(databasePath);if(databaseDirectory!=='.')fs.mkdirSync(databaseDirectory,{recursive:true});
 const app=express(),db=new Database(databasePath),allowedOrigins=(process.env.FRONTEND_URL||'').split(',').map(x=>x.trim().replace(/\/$/,'')).filter(Boolean);app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);cb(new Error('Origin not allowed by CORS'))}}));app.use(express.json({limit:'8mb'}));app.use(express.static('dist'));app.use('/assets',express.static('public'));fs.mkdirSync('public/uploads',{recursive:true});
 db.exec(`CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,name TEXT NOT NULL,package_name TEXT,myfxbook_url TEXT NOT NULL,active INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,last_sync TEXT);CREATE TABLE IF NOT EXISTS snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,captured_at TEXT DEFAULT CURRENT_TIMESTAMP,gain REAL,daily REAL,monthly REAL,yearly REAL,drawdown REAL,balance REAL,equity REAL,profit REAL,pips REAL,trades INTEGER,win_rate REAL,profit_factor REAL,FOREIGN KEY(account_id) REFERENCES accounts(id));CREATE TABLE IF NOT EXISTS socials(id INTEGER PRIMARY KEY AUTOINCREMENT,platform TEXT,url TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE IF NOT EXISTS pages(id INTEGER PRIMARY KEY AUTOINCREMENT,slug TEXT UNIQUE,title TEXT,body TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS portfolio_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL CHECK(event_type IN ('onboarded','offboarded','profit_withdrawn')),client_name TEXT NOT NULL,account_number TEXT NOT NULL,amount REAL NOT NULL CHECK(amount>0),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
 db.exec(`CREATE TABLE IF NOT EXISTS portfolio_clients(client_id TEXT PRIMARY KEY,first_name TEXT NOT NULL,second_name TEXT NOT NULL,email TEXT NOT NULL DEFAULT '',whatsapp_number TEXT NOT NULL DEFAULT '',national_id TEXT NOT NULL,address_line1 TEXT NOT NULL,address_line2 TEXT NOT NULL DEFAULT '',city TEXT NOT NULL,state TEXT NOT NULL,country TEXT NOT NULL,pincode TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,deleted_at TEXT);`);
+db.exec(`CREATE TABLE IF NOT EXISTS billing_invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_number TEXT NOT NULL UNIQUE,client_id TEXT NOT NULL,client_name TEXT NOT NULL,client_email TEXT NOT NULL,client_phone TEXT NOT NULL DEFAULT '',client_address TEXT NOT NULL DEFAULT '',issue_date TEXT NOT NULL,due_date TEXT NOT NULL,period_type TEXT NOT NULL CHECK(period_type IN ('weekly','monthly')),period_start TEXT NOT NULL,period_end TEXT NOT NULL,withdrawal_profit_usd REAL NOT NULL DEFAULT 0,profit_split_percent REAL NOT NULL,profit_share_usd REAL NOT NULL DEFAULT 0,profit_share_amount REAL NOT NULL DEFAULT 0,server_maintenance_usd REAL NOT NULL DEFAULT 0,server_maintenance_amount REAL NOT NULL DEFAULT 0,custom_line_items TEXT NOT NULL DEFAULT '[]',usd_inr_rate REAL NOT NULL,amount REAL NOT NULL CHECK(amount>0),status TEXT NOT NULL DEFAULT 'email_failed' CHECK(status IN ('sent','email_failed')),emailed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(client_id,period_start,period_type));CREATE INDEX IF NOT EXISTS billing_invoices_created_idx ON billing_invoices(created_at DESC);CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC);`);
 if(!db.prepare('PRAGMA table_info(portfolio_clients)').all().some(column=>column.name==='email'))db.exec("ALTER TABLE portfolio_clients ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+if(!db.prepare('PRAGMA table_info(billing_invoices)').all().some(column=>column.name==='account_number'))db.exec("ALTER TABLE billing_invoices ADD COLUMN account_number TEXT NOT NULL DEFAULT ''");
 if(!db.prepare('PRAGMA table_info(portfolio_clients)').all().some(column=>column.name==='whatsapp_number'))db.exec("ALTER TABLE portfolio_clients ADD COLUMN whatsapp_number TEXT NOT NULL DEFAULT ''");
 const portfolioSchema=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_events'").get()?.sql||'';
 if(!portfolioSchema.includes("'funds_added'")){
@@ -234,6 +236,80 @@ app.put('/api/admin/message-templates',auth,(req,res)=>{
  return res.json({ok:true});
 });
 app.get('/api/admin/portfolio/clients',auth,(req,res)=>res.json({clients:getPortfolioClients()}));
+const readBillingInvoice=row=>row?{...row,custom_line_items:JSON.parse(row.custom_line_items||'[]')}:null;
+const getBillingInvoice=id=>readBillingInvoice(db.prepare('SELECT * FROM billing_invoices WHERE id=?').get(id));
+const saveBillingInvoice=invoice=>db.prepare(`INSERT INTO billing_invoices(invoice_number,client_id,account_number,client_name,client_email,client_phone,client_address,issue_date,due_date,period_type,period_start,period_end,withdrawal_profit_usd,profit_split_percent,profit_share_usd,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,usd_inr_rate,amount,status,emailed_at) VALUES(@invoice_number,@client_id,@account_number,@client_name,@client_email,@client_phone,@client_address,@issue_date,@due_date,@period_type,@period_start,@period_end,@withdrawal_profit_usd,@profit_split_percent,@profit_share_usd,@profit_share_amount,@server_maintenance_usd,@server_maintenance_amount,@custom_line_items,@usd_inr_rate,@amount,@status,@emailed_at)`).run({...invoice,custom_line_items:JSON.stringify(invoice.custom_line_items)});
+async function deliverBillingInvoice(id){
+ const invoice=getBillingInvoice(id);
+ if(!invoice)return {invoice:null,error:new Error('Invoice not found')};
+ let pdf;
+ try{
+  pdf=await createBillingPdf(invoice);
+  await sendBillingInvoiceEmail(invoice,pdf);
+ }catch(error){
+  try{
+   db.prepare("UPDATE billing_invoices SET status='email_failed',emailed_at=NULL WHERE id=?").run(id);
+  }catch(updateError){
+   console.error('Invoice email failed and its status could not be updated',updateError);
+   return {invoice:getBillingInvoice(id),error:new Error(`Email delivery failed: ${error.message}. The failure status could not be saved.`)};
+  }
+  return {invoice:getBillingInvoice(id),error};
+ }
+ try{
+  db.prepare("UPDATE billing_invoices SET status='sent',emailed_at=? WHERE id=?").run(new Date().toISOString(),id);
+  return {invoice:getBillingInvoice(id)};
+ }catch(error){
+  console.error('Invoice email was delivered but its status could not be updated',error);
+  return {invoice:getBillingInvoice(id),error:new Error(`The email was delivered, but the sent status could not be saved: ${error.message}`)};
+ }
+}
+app.get('/api/admin/billing/invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT * FROM billing_invoices ORDER BY created_at DESC,id DESC LIMIT 100').all().map(readBillingInvoice)}));
+app.post('/api/admin/billing/invoices',auth,async(req,res)=>{
+ const input=req.body||{},clientId=String(input.client_id||'').trim().toUpperCase();
+ const client=db.prepare('SELECT * FROM portfolio_clients WHERE client_id=? AND deleted_at IS NULL').get(clientId);
+ if(!client)return res.status(404).json({message:'Choose an active registered client before creating an invoice.'});
+ const accountNumber=String(input.account_number||'').trim();
+ if(!accountNumber)return res.status(400).json({message:'Choose an account number for this invoice.'});
+ const registeredAccount=db.prepare('SELECT 1 FROM portfolio_events WHERE client_id=? AND account_number=? AND deleted_at IS NULL LIMIT 1').get(clientId,accountNumber);
+ if(!registeredAccount)return res.status(404).json({message:'Choose an account number linked to this registered client in Portfolio.'});
+ let period;
+ try{period=getBillingPeriodDates(input)}catch(error){return res.status(400).json({message:error.message})}
+ const monthStart=`${period.periodStart.slice(0,7)}-01`,monthEnd=`${period.periodStart.slice(0,7)}-${String(new Date(Date.UTC(Number(period.periodStart.slice(0,4)),Number(period.periodStart.slice(5,7)),0)).getUTCDate()).padStart(2,'0')}`;
+ const monthInvoices=db.prepare("SELECT period_type,period_start,server_maintenance_usd FROM billing_invoices WHERE client_id=? AND period_start>=? AND period_start<=?").all(clientId,monthStart,monthEnd);
+ if(monthInvoices.some(invoice=>invoice.period_type!==input.period_type))return res.status(409).json({message:'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.'});
+ if(monthInvoices.some(invoice=>invoice.period_type===input.period_type&&invoice.period_start===period.periodStart))return res.status(409).json({message:'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.'});
+ let invoice;
+ try{invoice=createBillingInvoice(client,input,monthInvoices.some(item=>Number(item.server_maintenance_usd)>0))}
+ catch(error){return res.status(400).json({message:error.message})}
+ let saved;
+ try{saved=saveBillingInvoice(invoice)}
+ catch(error){
+  if(error.code==='SQLITE_CONSTRAINT_UNIQUE')return res.status(409).json({message:'An invoice already exists for this client and billing period.'});
+  console.error('Unable to save billing invoice',error);
+  return res.status(500).json({message:'Unable to save the invoice.'});
+ }
+ const result=await deliverBillingInvoice(Number(saved.lastInsertRowid));
+ if(result.error)return res.status(502).json({message:`Invoice ${invoice.invoice_number} was saved, but email delivery failed: ${result.error.message}`,invoice:result.invoice});
+ return res.status(201).json({invoice:result.invoice});
+});
+app.get('/api/admin/billing/invoices/:id/pdf',auth,async(req,res)=>{
+ const id=Number(req.params.id),invoice=Number.isInteger(id)&&id>0?getBillingInvoice(id):null;
+ if(!invoice)return res.status(404).json({message:'Invoice not found.'});
+ try{
+  const pdf=await createBillingPdf(invoice);
+  res.set('Content-Type','application/pdf');
+  res.set('Content-Disposition',`attachment; filename="${invoice.invoice_number}.pdf"`);
+  return res.send(pdf);
+ }catch(error){console.error('Unable to create invoice PDF',error);return res.status(500).json({message:'Unable to create the invoice PDF.'})}
+});
+app.post('/api/admin/billing/invoices/:id/send',auth,async(req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isInteger(id)||id<=0)return res.status(400).json({message:'Invalid invoice ID.'});
+ const result=await deliverBillingInvoice(id);
+ if(!result.invoice)return res.status(404).json({message:'Invoice not found.'});
+ if(result.error)return res.status(502).json({message:`Email delivery failed: ${result.error.message}`,invoice:result.invoice});
+ return res.json({invoice:result.invoice});
+});
 app.put('/api/admin/portfolio/clients/:clientId',auth,(req,res)=>{
  const clientId=String(req.params.clientId||'').trim().toUpperCase(),input=req.body||{},client={
   first_name:String(input.first_name||'').trim(),second_name:String(input.second_name||'').trim(),
