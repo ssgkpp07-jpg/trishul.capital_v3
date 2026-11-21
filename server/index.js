@@ -1,4 +1,4 @@
-import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {buildServerBillingSchedule,createBillingInvoice,createBillingPdf,createServerBillingInvoice,formatBillingInvoiceNumber,getBillingPeriodDates,getDefaultBillingSettings,normalizeBillingSettings,replaceInvoiceAccountNumber} from '../billing.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
+import express from 'express';import cors from 'cors';import dotenv from 'dotenv';import jwt from 'jsonwebtoken';import Database from 'better-sqlite3';import path from 'node:path';import fs from 'node:fs';import crypto from 'node:crypto';import {summarizePortfolio,summarizePortfolioMonths,buildPortfolioWorkbook,filterPortfolioEventsByDate} from '../portfolio.js';import {buildServerBillingSchedule,createBillingInvoice,createBillingPdf,formatBillingInvoiceNumber,getBillingPeriodDates,getDefaultBillingSettings,normalizeBillingSettings,replaceInvoiceAccountNumber} from '../billing.js';import {getMarketQuotes} from './market-quotes.js';dotenv.config();
 const databasePath=process.env.DATABASE_PATH||'trishul.db',databaseDirectory=path.dirname(databasePath);if(databaseDirectory!=='.')fs.mkdirSync(databaseDirectory,{recursive:true});
 const app=express(),db=new Database(databasePath),allowedOrigins=(process.env.FRONTEND_URL||'').split(',').map(x=>x.trim().replace(/\/$/,'')).filter(Boolean);app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);cb(new Error('Origin not allowed by CORS'))}}));app.use(express.json({limit:'8mb'}));app.use(express.static('dist'));app.use('/assets',express.static('public'));fs.mkdirSync('public/uploads',{recursive:true});
 db.exec(`CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,name TEXT NOT NULL,package_name TEXT,myfxbook_url TEXT NOT NULL,active INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,last_sync TEXT);CREATE TABLE IF NOT EXISTS snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,captured_at TEXT DEFAULT CURRENT_TIMESTAMP,gain REAL,daily REAL,monthly REAL,yearly REAL,drawdown REAL,balance REAL,equity REAL,profit REAL,pips REAL,trades INTEGER,win_rate REAL,profit_factor REAL,FOREIGN KEY(account_id) REFERENCES accounts(id));CREATE TABLE IF NOT EXISTS socials(id INTEGER PRIMARY KEY AUTOINCREMENT,platform TEXT,url TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE IF NOT EXISTS pages(id INTEGER PRIMARY KEY AUTOINCREMENT,slug TEXT UNIQUE,title TEXT,body TEXT,active INTEGER DEFAULT 1);CREATE TABLE IF NOT EXISTS portfolio_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL CHECK(event_type IN ('onboarded','offboarded','profit_withdrawn')),client_name TEXT NOT NULL,account_number TEXT NOT NULL,amount REAL NOT NULL CHECK(amount>0),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
@@ -16,7 +16,9 @@ if(billingInvoiceSql.includes('UNIQUE(client_id,period_start,period_type)')){
 for(const [column,definition] of [['billing_type',"TEXT NOT NULL DEFAULT 'standard'"],['server_billing_due_date','TEXT'],['invoice_settings',"TEXT NOT NULL DEFAULT '{}'"],['payment_status',"TEXT NOT NULL DEFAULT 'pending'"],['paid_at','TEXT'],['payment_method','TEXT'],['payment_reference','TEXT'],['delivery_status',"TEXT NOT NULL DEFAULT 'not_sent'"],['deleted_at','TEXT']]){
  if(!db.prepare('PRAGMA table_info(billing_invoices)').all().some(item=>item.name===column))db.exec(`ALTER TABLE billing_invoices ADD COLUMN ${column} ${definition}`);
 }
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS billing_invoices_standard_period_idx ON billing_invoices(client_id,period_start,period_type) WHERE billing_type=\'standard\' AND deleted_at IS NULL;CREATE UNIQUE INDEX IF NOT EXISTS billing_invoices_server_cycle_idx ON billing_invoices(client_id,server_billing_due_date) WHERE billing_type=\'server_fee\' AND deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_created_idx ON billing_invoices(created_at DESC);CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC)');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS billing_invoices_standard_period_idx ON billing_invoices(client_id,period_start,period_type) WHERE billing_type=\'standard\' AND deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_created_idx ON billing_invoices(created_at DESC);CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC)');
+const serverCycleIndexColumns=db.prepare("PRAGMA index_info('billing_invoices_server_cycle_idx')").all().map(column=>column.name);
+if(serverCycleIndexColumns.join(',')!=='client_id,server_billing_due_date,account_number')db.exec('DROP INDEX IF EXISTS billing_invoices_server_cycle_idx;CREATE UNIQUE INDEX billing_invoices_server_cycle_idx ON billing_invoices(client_id,server_billing_due_date,account_number) WHERE billing_type=\'server_fee\' AND deleted_at IS NULL');
 db.exec('CREATE TABLE IF NOT EXISTS billing_invoice_sequences(issue_year INTEGER NOT NULL,issue_month INTEGER NOT NULL,last_sequence INTEGER NOT NULL CHECK(last_sequence>0),PRIMARY KEY(issue_year,issue_month))');
 if(!db.prepare('PRAGMA table_info(portfolio_clients)').all().some(column=>column.name==='whatsapp_number'))db.exec("ALTER TABLE portfolio_clients ADD COLUMN whatsapp_number TEXT NOT NULL DEFAULT ''");
 const portfolioSchema=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_events'").get()?.sql||'';
@@ -251,8 +253,9 @@ app.put('/api/admin/message-templates',auth,(req,res)=>{
 });
 app.get('/api/admin/portfolio/clients',auth,(req,res)=>res.json({clients:getPortfolioClients()}));
 app.put('/api/admin/portfolio/account',auth,(req,res)=>{
- const clientId=String(req.body?.client_id||'').trim().toUpperCase(),oldNumber=String(req.body?.account_number||'').trim(),newNumber=String(req.body?.new_account_number||'').trim(),serverBillingEnabled=req.body?.server_billing_enabled;
+ const clientId=String(req.body?.client_id||'').trim().toUpperCase(),oldNumber=String(req.body?.account_number||'').trim(),newNumber=String(req.body?.new_account_number||'').trim(),onboardedDate=String(req.body?.onboarded_date||'').trim(),serverBillingEnabled=req.body?.server_billing_enabled;
  if(!clientId||!oldNumber||!newNumber||oldNumber.length>100||newNumber.length>100)return res.status(400).json({message:'Client ID and valid old and new account numbers are required.'});
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(onboardedDate)||Number.isNaN(new Date(`${onboardedDate}T00:00:00.000Z`).getTime())||new Date(`${onboardedDate}T00:00:00.000Z`).toISOString().slice(0,10)!==onboardedDate)return res.status(400).json({message:'Enter a valid account onboarded date.'});
  if(typeof serverBillingEnabled!=='boolean')return res.status(400).json({message:'Choose whether monthly server billing is enabled.'});
  const update=db.transaction(()=>{
   const portfolio=getPortfolio();
@@ -264,11 +267,7 @@ app.put('/api/admin/portfolio/account',auth,(req,res)=>{
   for(const event of events){if(event.event_type==='offboarded')onboardingEvent=null;else if(event.event_type==='onboarded')onboardingEvent=event;}
   if(!onboardingEvent)return {error:'No active onboarding record was found for this account.',status:409};
   if(oldNumber!==newNumber)db.prepare('UPDATE portfolio_events SET account_number=? WHERE client_id=? AND account_number=?').run(newNumber,clientId,oldNumber);
-  db.prepare('UPDATE portfolio_events SET server_billing_enabled=?,server_billing_onboarding_date=? WHERE id=?').run(
-   serverBillingEnabled?1:0,
-   serverBillingEnabled?(onboardingEvent.server_billing_onboarding_date||String(onboardingEvent.created_at).slice(0,10)):null,
-   onboardingEvent.id
-  );
+  db.prepare('UPDATE portfolio_events SET server_billing_enabled=?,server_billing_onboarding_date=? WHERE id=?').run(serverBillingEnabled?1:0,onboardedDate,onboardingEvent.id);
   if(oldNumber!==newNumber){
    const invoices=db.prepare('SELECT * FROM billing_invoices WHERE client_id=?').all(clientId);
    const save=db.prepare('UPDATE billing_invoices SET account_number=?,custom_line_items=? WHERE id=?');
@@ -343,15 +342,25 @@ app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  if(!accountNumber)return res.status(400).json({message:'Choose an account number for this invoice.'});
  const registeredAccount=db.prepare('SELECT 1 FROM portfolio_events WHERE client_id=? AND account_number=? AND deleted_at IS NULL LIMIT 1').get(clientId,accountNumber);
  if(!registeredAccount)return res.status(404).json({message:'Choose an account number linked to this registered client in Portfolio.'});
+ const scheduledDueDate=String(input.server_billing_due_date||'').trim();
+ let monthInvoices=[];
+ if(scheduledDueDate){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate)||Number.isNaN(new Date(`${scheduledDueDate}T00:00:00.000Z`).getTime())||new Date(`${scheduledDueDate}T00:00:00.000Z`).toISOString().slice(0,10)!==scheduledDueDate)return res.status(400).json({message:'Choose a valid server billing due date.'});
+  const cycle=buildServerBillingOverview(new Date().toISOString().slice(0,10),readBillingSettings()).find(item=>item.client_id===clientId&&item.due_date===scheduledDueDate&&item.account_numbers.includes(accountNumber));
+  if(!cycle)return res.status(400).json({message:'This account does not have an enabled server billing cycle for that due date.'});
+  if(cycle.invoice_id)return res.status(409).json({message:'An invoice already exists for this account and server billing cycle.'});
+ }
  let period;
  try{period=getBillingPeriodDates(input)}catch(error){return res.status(400).json({message:error.message})}
- const monthStart=`${period.periodStart.slice(0,7)}-01`,monthEnd=`${period.periodStart.slice(0,7)}-${String(new Date(Date.UTC(Number(period.periodStart.slice(0,4)),Number(period.periodStart.slice(5,7)),0)).getUTCDate()).padStart(2,'0')}`;
- const monthInvoices=db.prepare("SELECT period_type,period_start,server_maintenance_usd FROM billing_invoices WHERE client_id=? AND billing_type='standard' AND deleted_at IS NULL AND period_start>=? AND period_start<=?").all(clientId,monthStart,monthEnd);
- if(monthInvoices.some(invoice=>invoice.period_type!==input.period_type))return res.status(409).json({message:'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.'});
- if(monthInvoices.some(invoice=>invoice.period_type===input.period_type&&invoice.period_start===period.periodStart))return res.status(409).json({message:'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.'});
+ if(!scheduledDueDate){
+  const monthStart=`${period.periodStart.slice(0,7)}-01`,monthEnd=`${period.periodStart.slice(0,7)}-${String(new Date(Date.UTC(Number(period.periodStart.slice(0,4)),Number(period.periodStart.slice(5,7)),0)).getUTCDate()).padStart(2,'0')}`;
+  monthInvoices=db.prepare("SELECT period_type,period_start,server_maintenance_usd FROM billing_invoices WHERE client_id=? AND billing_type='standard' AND deleted_at IS NULL AND period_start>=? AND period_start<=?").all(clientId,monthStart,monthEnd);
+  if(monthInvoices.some(invoice=>invoice.period_type!==input.period_type))return res.status(409).json({message:'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.'});
+  if(monthInvoices.some(invoice=>invoice.period_type===input.period_type&&invoice.period_start===period.periodStart))return res.status(409).json({message:'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.'});
+ }
  let invoice;
  const issueDate=new Date().toISOString().slice(0,10),[issueYear,issueMonth]=issueDate.slice(0,7).split('-').map(Number);
- try{invoice=createBillingInvoice(client,input,monthInvoices.some(item=>Number(item.server_maintenance_usd)>0),readBillingSettings(),formatBillingInvoiceNumber(issueYear,issueMonth,1),issueDate)}
+ try{invoice=createBillingInvoice(client,input,!scheduledDueDate&&monthInvoices.some(item=>Number(item.server_maintenance_usd)>0),readBillingSettings(),formatBillingInvoiceNumber(issueYear,issueMonth,1),issueDate)}
  catch(error){return res.status(400).json({message:error.message})}
  let saved;
  try{saved=saveBillingInvoice(invoice)}
@@ -363,25 +372,7 @@ app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  return res.status(201).json({invoice:getBillingInvoice(Number(saved.lastInsertRowid))});
 });
 app.post('/api/admin/billing/server-invoices',auth,(req,res)=>{
- const clientId=String(req.body?.client_id||'').trim().toUpperCase(),dueDate=String(req.body?.due_date||'').trim(),settings=readBillingSettings();
- const cycles=buildServerBillingOverview(new Date().toISOString().slice(0,10),settings);
- const cycle=cycles.find(item=>item.client_id===clientId&&item.due_date===dueDate);
- if(!cycle)return res.status(404).json({message:'No enabled server billing cycle was found for this client and due date.'});
- if(cycle.invoice_id)return res.status(409).json({message:'An invoice already exists for this server billing cycle.'});
- const client=db.prepare('SELECT * FROM portfolio_clients WHERE client_id=? AND deleted_at IS NULL').get(clientId);
- if(!client)return res.status(404).json({message:'The registered client for this server billing cycle is no longer active.'});
- let invoice;
- const issueDate=new Date().toISOString().slice(0,10),[issueYear,issueMonth]=issueDate.slice(0,7).split('-').map(Number);
- try{invoice=createServerBillingInvoice(client,dueDate,cycle.account_numbers,settings,formatBillingInvoiceNumber(issueYear,issueMonth,1),issueDate)}
- catch(error){return res.status(400).json({message:error.message})}
- try{
-  const saved=saveBillingInvoice(invoice);
-  return res.status(201).json({invoice:getBillingInvoice(Number(saved.lastInsertRowid))});
- }catch(error){
-  if(error.code==='SQLITE_CONSTRAINT_UNIQUE')return res.status(409).json({message:'A server fee invoice already exists for this client and due date.'});
-  console.error('Unable to save server billing invoice',error);
-  return res.status(500).json({message:'Unable to save the server fee invoice.'});
- }
+ return res.status(410).json({message:'Server-fee invoices are now created manually from the invoice form.'});
 });
 app.get('/api/admin/billing/invoices/:id/pdf',auth,async(req,res)=>{
  const id=Number(req.params.id),invoice=Number.isInteger(id)&&id>0?readBillingInvoice(db.prepare('SELECT * FROM billing_invoices WHERE id=? AND deleted_at IS NULL').get(id)):null;
