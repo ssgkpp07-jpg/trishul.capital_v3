@@ -251,6 +251,21 @@ export function formatBillingInvoiceNumber(year, month, sequence) {
   return `INV-TC-${String(sequence).padStart(3, '0')}/${String(month).padStart(2, '0')}/${year}`;
 }
 
+export function createUpiPaymentUri(invoice, settings) {
+  const upiId = String(settings?.upi_id || '').trim();
+  const amount = Number(invoice?.amount);
+  if (!/^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$/.test(upiId) || !Number.isFinite(amount) || amount <= 0) return null;
+  const payeeName = String(settings.company_name || '').trim().slice(0, 100) || 'Trishul Capital';
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: payeeName,
+    am: amount.toFixed(2),
+    cu: 'INR',
+    tn: `Invoice ${String(invoice.invoice_number || '')}`.slice(0, 80)
+  });
+  return `upi://pay?${params.toString()}`;
+}
+
 export function getNextBillingInvoiceSequence(lastSequence, reusableSequence) {
   const last = Number(lastSequence);
   if (!Number.isSafeInteger(last) || last < 0 || last >= Number.MAX_SAFE_INTEGER) {
@@ -509,6 +524,7 @@ export function createBillingPdf(invoice) {
       document.addPage();
       rowY = 55;
     }
+    const paymentUri = createUpiPaymentUri(invoice, settings);
     document.fillColor('#4b515a').font('Helvetica-Bold').fontSize(8).text('PAYMENT DETAILS', left, rowY);
     rowY += 15;
     if (qr) document.image(qr, left, rowY, { fit: [90, 90] });
@@ -520,10 +536,21 @@ export function createBillingPdf(invoice) {
       settings.bank_branch ? `Branch: ${settings.bank_branch}` : '',
       settings.bank_ifsc ? `IFSC: ${settings.bank_ifsc}` : ''
     ].filter(Boolean);
+    const bankDetailsX = qr ? left + 105 : left;
+    const bankDetailsWidth = paymentUri ? right - bankDetailsX - 212 : qr ? 300 : contentWidth;
     document.font('Helvetica').fillColor('#333').fontSize(8).text(
       bankDetails.length ? bankDetails.join('\n') : 'Contact us for payment instructions.',
-      qr ? left + 105 : left, rowY + 2, { width: qr ? 300 : contentWidth, lineGap: 4 }
+      bankDetailsX, rowY + 2, { width: bankDetailsWidth, lineGap: 4 }
     );
+    if (paymentUri) {
+      const buttonX = right - 200;
+      const buttonY = rowY + 2;
+      document.roundedRect(buttonX, buttonY, 200, 42, 6).fill('#168447');
+      document.fillColor('#fff').font('Helvetica-Bold').fontSize(9)
+        .text('PAY NOW', buttonX + 8, buttonY + 6, { width: 184, align: 'center' })
+        .fontSize(8).text(`INR ${Number(invoice.amount).toFixed(2)}`, buttonX + 8, buttonY + 22, { width: 184, align: 'center' });
+      document.link(buttonX, buttonY, 200, 42, paymentUri);
+    }
     if (invoice.payment_status === 'paid') {
       const paidDetails = ['Payment verified manually', invoice.paid_at ? `Verified on: ${String(invoice.paid_at).slice(0, 10)}` : '', invoice.payment_reference ? `Reference: ${invoice.payment_reference}` : ''].filter(Boolean).join(' · ');
       document.fillColor('#24743a').font('Helvetica-Bold').fontSize(8)
@@ -531,7 +558,7 @@ export function createBillingPdf(invoice) {
     }
 
     const footer = 'Please use the invoice number as your payment reference. This invoice is not a GST tax invoice unless applicable tax details are separately stated.';
-    document.fillColor('#777').font('Helvetica').fontSize(7).text(footer, left, document.page.height - 55, {
+    document.fillColor('#777').font('Helvetica').fontSize(7).text(footer, left, document.page.height - 80, {
       width: contentWidth, align: 'center'
     });
     document.end();
