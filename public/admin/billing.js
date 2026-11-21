@@ -71,10 +71,10 @@
     <div id="billingMsg" class="notice hidden" role="status"></div>
     <section class="billing-view" data-billing-view="overview">
       <div id="billingSummary" class="billing-summary" aria-live="polite"></div>
-      <div class="bar"><div><h3>Monthly server billing</h3><p class="muted">Fees are due seven days before each monthly onboarding-date anniversary. Anniversary dates beyond a month’s last day are clamped to that month’s end.</p></div></div>
-      <p class="billing-table-note">A server-fee invoice is created only when you choose Generate invoice. Enabled accounts remain listed even before you set the global fee in Invoice Settings.</p>
+      <div class="bar"><div><h3>Monthly server billing</h3><p class="muted">Each cycle is due on the account’s monthly onboarding-date anniversary. Dates beyond a month’s last day are clamped to that month’s end.</p></div></div>
+      <p class="billing-table-note">Choose Create invoice to open the invoice form with the due date and account preselected. Enter that invoice’s server cost, exchange rate, profit share, and any additional lines yourself.</p>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
-        <thead><tr><th>Due date</th><th>Client</th><th>Account number(s)</th><th>Amount (USD)</th><th>INR estimate</th><th>Status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Due date</th><th>Client</th><th>Account number</th><th>Server cost (USD)</th><th>Server cost (INR)</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="billingScheduleRows"><tr><td colspan="7">Loading server billing…</td></tr></tbody>
       </table></div>
     </section>
@@ -89,9 +89,10 @@
         <div><label for="billingMonth">Month</label><select id="billingMonth" required></select></div>
         <div id="billingWeekField" class="billing-week-field hidden"><label for="billingWeek">Week of month</label><select id="billingWeek"></select></div>
         <div><label for="billingWithdrawalProfit">Withdrawal profit (USD)</label><input id="billingWithdrawalProfit" type="number" min="0" step="0.01" value="0" required></div>
-        <div><label for="billingSplit">Profit share (%)</label><input id="billingSplit" type="number" min="0" max="100" step="0.01" required></div>
-        <div><label for="billingMaintenance">Additional server maintenance (USD)</label><input id="billingMaintenance" type="number" min="0" step="0.01" value="0" required></div>
+        <div><label for="billingSplit">Profit share (%)</label><input id="billingSplit" type="number" min="0" max="100" step="0.01" value="0" required></div>
+        <div><label for="billingMaintenance">Server cost (USD)</label><input id="billingMaintenance" type="number" min="0" step="0.01" value="0" required></div>
         <div><label for="billingRate">USD to INR exchange rate</label><input id="billingRate" type="number" min="0.0001" step="0.0001" required></div>
+        <div id="billingScheduledCycleNote" class="billing-help hidden"><span id="billingScheduledCycleText"></span> <button type="button" class="portfolio-action" id="billingClearScheduledCycle">Clear scheduled cycle</button></div>
         <p id="billingClientDetails" class="billing-client-email" aria-live="polite">Choose a client to see their saved email and WhatsApp details.</p>
         <div class="billing-custom-wrap"><span class="billing-client-email">Optional custom invoice lines (USD)</span><div id="billingCustomLines"></div><button type="button" class="portfolio-action" id="billingAddLine">Add custom line</button></div>
         <p class="billing-help">Creating an invoice does not send it. Download the PDF, then attach it yourself to the email or WhatsApp draft.</p>
@@ -127,8 +128,6 @@
           <div><label for="billingSettingsCompany">Company name</label><input id="billingSettingsCompany" maxlength="200" required></div>
           <div><label for="billingSettingsPhone">Phone number</label><input id="billingSettingsPhone" maxlength="100"></div>
           <div><label for="billingSettingsEmail">Email address</label><input id="billingSettingsEmail" type="email" maxlength="200"></div>
-          <div><label for="billingSettingsServerFee">Global monthly server fee (USD per enabled account)</label><input id="billingSettingsServerFee" type="number" min="0" step="0.01" required></div>
-          <div><label for="billingSettingsRate">Default USD to INR rate for server-fee invoices</label><input id="billingSettingsRate" type="number" min="0" step="0.0001" required></div>
           <div style="grid-column:1/-1"><label for="billingSettingsAddress">From address</label><textarea id="billingSettingsAddress" maxlength="1000"></textarea></div>
         </div>
         <button type="submit" class="portfolio-action">Save Invoice Settings</button>
@@ -146,7 +145,7 @@
   const portfolioForm = document.getElementById('portfolioForm');
   const serverBillingField = document.createElement('div');
   serverBillingField.id = 'portfolioServerBillingField';
-  serverBillingField.innerHTML = '<label class="billing-checkbox" for="portfolioServerBillingEnabled"><input id="portfolioServerBillingEnabled" type="checkbox"> Bill monthly server fee for this account</label><p class="billing-help">This uses the global USD fee in Billing → Invoice Settings.</p>';
+  serverBillingField.innerHTML = '<label class="billing-checkbox" for="portfolioServerBillingEnabled"><input id="portfolioServerBillingEnabled" type="checkbox"> Track monthly server billing for this account</label><p class="billing-help">This adds monthly due-date reminders. Enter the server cost and exchange rate each time you create an invoice.</p>';
   portfolioForm.append(serverBillingField);
   const updateServerBillingToggle = () => {
     const newAccount = document.getElementById('portfolioAccountSelect').value === '__new__';
@@ -219,6 +218,7 @@
   let billingAccounts = [];
   let serverCycles = [];
   let billingSettings = {};
+  let scheduledServerBillingDueDate = '';
   let billingPdfPreviewUrl = '';
 
   function setBillingMessage(text, isError = false) {
@@ -314,16 +314,19 @@
     const serverInvoices = auditInvoices.filter(invoice => invoice.billing_type === 'server_fee');
     const pendingServer = serverInvoices.filter(invoice => invoice.payment_status !== 'paid');
     const settledServer = serverInvoices.filter(invoice => invoice.payment_status === 'paid');
-    const profitInvoices = auditInvoices.filter(invoice => invoice.billing_type !== 'server_fee' && Number(invoice.profit_share_amount || 0) > 0);
+    const profitInvoices = auditInvoices.filter(invoice => Number(invoice.profit_share_amount || 0) > 0);
     const pendingProfit = profitInvoices.filter(invoice => invoice.payment_status !== 'paid');
     const settledProfit = profitInvoices.filter(invoice => invoice.payment_status === 'paid');
     const serverInvoiceUsd = invoice => {
       const lines = Array.isArray(invoice.custom_line_items) ? invoice.custom_line_items : [];
-      return lines.reduce((sum, line) => sum + Number(line.amount_usd || 0), 0);
+      const legacyFees = lines.filter(line => String(line.description || '').startsWith('Monthly server fee · Account '));
+      return legacyFees.length
+        ? legacyFees.reduce((sum, line) => sum + Number(line.amount_usd || 0), 0)
+        : Number(invoice.server_maintenance_usd || 0);
     };
     const total = auditInvoices.reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
     document.getElementById('billingSummary').innerHTML = [
-      ['Upcoming server fees', `${upcoming.length} · ${moneyUsd(upcoming.reduce((sum, cycle) => sum + Number(cycle.amount_usd || 0), 0))}`],
+      ['Upcoming server fees', `${upcoming.length} cycle${upcoming.length === 1 ? '' : 's'}`],
       ['Pending server invoices', `${pendingServer.length} · ${moneyUsd(pendingServer.reduce((sum, invoice) => sum + serverInvoiceUsd(invoice), 0))}`],
       ['Settled server fees', `${settledServer.length} · ${moneyUsd(settledServer.reduce((sum, invoice) => sum + serverInvoiceUsd(invoice), 0))}`],
       ['Pending profit split invoices', `${pendingProfit.length} · ${moneyInr(pendingProfit.reduce((sum, invoice) => sum + Number(invoice.profit_share_amount || 0), 0))}`],
@@ -338,14 +341,13 @@
     rows.innerHTML = serverCycles.map(cycle => {
       const action = cycle.invoice_id
         ? `<button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(cycle.invoice_id)})">Preview invoice</button>`
-        : Number(billingSettings.monthly_server_fee_usd) > 0
-          ? `<button type="button" class="portfolio-action" onclick="generateServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${cycle.due_date}')">Generate invoice</button>`
-          : '<button type="button" class="portfolio-action" disabled title="Set the monthly server fee in Invoice Settings first">Set fee first</button>';
+        : `<button type="button" class="portfolio-action" onclick="prepareServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${encodeURIComponent(cycle.account_numbers[0]).replace(/'/g, '%27')}','${cycle.due_date}')">Create invoice</button>`;
       return `<tr>
         <td>${escapeHtml(cycle.due_date)}${cycle.overdue && cycle.status === 'upcoming' ? '<br><span class="billing-error">Due</span>' : ''}</td>
         <td>${escapeHtml(cycle.client_id)} · ${escapeHtml(cycle.client_name)}<br><span class="muted">${escapeHtml(cycle.client_email || cycle.client_phone || '')}</span></td>
-        <td>${cycle.account_numbers.map(escapeHtml).join('<br>')}</td>
-        <td>${moneyUsd(cycle.amount_usd)}</td><td>${moneyInr(cycle.amount_inr)}</td>
+        <td>${escapeHtml(cycle.account_numbers[0])}</td>
+        <td>${cycle.amount_usd == null ? '<span class="muted">Set in invoice</span>' : moneyUsd(cycle.amount_usd)}</td>
+        <td>${cycle.amount_inr == null ? '<span class="muted">Set in invoice</span>' : moneyInr(cycle.amount_inr)}</td>
         <td>${statusBadge(cycle.status, cycle.overdue)}</td><td><div class="billing-actions">${action}</div></td>
       </tr>`;
     }).join('') || '<tr><td colspan="7">No active accounts have monthly server billing enabled.</td></tr>';
@@ -415,16 +417,13 @@
       billingSettingsCompany: 'company_name',
       billingSettingsPhone: 'company_phone',
       billingSettingsEmail: 'company_email',
-      billingSettingsAddress: 'company_address',
-      billingSettingsServerFee: 'monthly_server_fee_usd',
-      billingSettingsRate: 'usd_inr_rate'
+      billingSettingsAddress: 'company_address'
     };
     for (const [id, key] of Object.entries(fields)) document.getElementById(id).value = billingSettings[key] ?? '';
     document.getElementById('billingLogoPreview').src = billingSettings.logo_data_url || '/admin/assets/invoice-logo.webp';
     document.getElementById('billingLogoPreview').classList.toggle('hidden', !billingSettings.logo_data_url);
     document.getElementById('billingQrPreview').src = billingSettings.upi_qr_data_url || '';
     document.getElementById('billingQrPreview').classList.toggle('hidden', !billingSettings.upi_qr_data_url);
-    document.getElementById('billingRate').value = billingSettings.usd_inr_rate || '';
   }
 
   async function blobToPngDataUrl(blob) {
@@ -465,8 +464,6 @@
       company_address: 'billingSettingsAddress'
     };
     for (const [key, id] of Object.entries(fields)) billingSettings[key] = document.getElementById(id).value.trim();
-    billingSettings.monthly_server_fee_usd = Number(document.getElementById('billingSettingsServerFee').value);
-    billingSettings.usd_inr_rate = Number(document.getElementById('billingSettingsRate').value);
     return apiRequest('/api/admin/billing/settings', {
       method: 'PUT',
       body: JSON.stringify({ settings: billingSettings })
@@ -500,7 +497,6 @@
       renderAuditRows();
       renderBillingSchedule();
       renderBillingSummary();
-      if (billingSettings.usd_inr_rate > 0) document.getElementById('billingRate').value = billingSettings.usd_inr_rate;
       message.classList.add('hidden');
     } catch (error) {
       setBillingMessage(error.message, true);
@@ -627,17 +623,31 @@
     }
   }
 
-  async function generateServerInvoice(clientId, dueDate) {
-    try {
-      const result = await apiRequest('/api/admin/billing/server-invoices', {
-        method: 'POST',
-        body: JSON.stringify({ client_id: decodeURIComponent(clientId), due_date: dueDate })
-      });
-      setBillingMessage(`Server-fee invoice ${result.invoice.invoice_number} created. Download it and attach it to a message draft when ready.`);
-      await loadBilling();
-    } catch (error) {
-      setBillingMessage(error.message, true);
-    }
+  function prepareServerInvoice(clientId, accountNumber, dueDate) {
+    const clientIdValue = decodeURIComponent(clientId);
+    const accountNumberValue = decodeURIComponent(accountNumber);
+    const [year, month] = dueDate.split('-').map(Number);
+    switchBillingView('invoices');
+    clientSelect.value = clientIdValue;
+    renderBillingClients();
+    accountSelect.value = accountNumberValue;
+    document.getElementById('billingPeriodType').value = 'monthly';
+    document.getElementById('billingYear').value = String(year);
+    monthSelect.value = String(month);
+    updateWeekOptions();
+    updateBillingPeriod();
+    scheduledServerBillingDueDate = dueDate;
+    document.getElementById('billingScheduledCycleText').textContent = `Scheduled server cycle for ${accountNumberValue}, due ${dueDate}. Enter the server cost and USD-to-INR rate; profit share and extra lines are optional.`;
+    document.getElementById('billingScheduledCycleNote').classList.remove('hidden');
+    document.getElementById('billingMaintenance').focus();
+    document.getElementById('billingForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setBillingMessage('Review the account and due date, then enter the amounts to create this invoice manually.');
+  }
+
+  function clearScheduledCycle() {
+    scheduledServerBillingDueDate = '';
+    document.getElementById('billingScheduledCycleNote').classList.add('hidden');
+    document.getElementById('billingScheduledCycleText').textContent = '';
   }
 
   function switchBillingView(view) {
@@ -667,6 +677,7 @@
   });
   document.getElementById('billingRefresh').addEventListener('click', loadBilling);
   document.getElementById('billingAddLine').addEventListener('click', addBillingLine);
+  document.getElementById('billingClearScheduledCycle').addEventListener('click', clearScheduledCycle);
   document.querySelectorAll('[data-billing-view-button]').forEach(button =>
     button.addEventListener('click', () => switchBillingView(button.dataset.billingViewButton))
   );
@@ -713,7 +724,8 @@
       profit_split_percent: Number(document.getElementById('billingSplit').value),
       server_maintenance_usd: Number(document.getElementById('billingMaintenance').value),
       usd_inr_rate: Number(document.getElementById('billingRate').value),
-      custom_line_items: customLines
+      custom_line_items: customLines,
+      server_billing_due_date: scheduledServerBillingDueDate || null
     };
     submit.disabled = true;
     try {
@@ -723,8 +735,9 @@
       monthSelect.value = String(new Date().getMonth() + 1);
       document.getElementById('billingWithdrawalProfit').value = '0';
       document.getElementById('billingMaintenance').value = '0';
-      document.getElementById('billingRate').value = billingSettings.usd_inr_rate || '';
+      document.getElementById('billingRate').value = '';
       document.getElementById('billingCustomLines').replaceChildren();
+      clearScheduledCycle();
       updateWeekOptions();
       updateBillingPeriod();
       renderBillingClients();
@@ -752,5 +765,5 @@
   window.markBillingInvoicePaid = markInvoicePaid;
   window.deleteBillingInvoice = removeInvoice;
   window.permanentlyDeleteBillingInvoice = permanentlyRemoveInvoice;
-  window.generateServerBillingInvoice = generateServerInvoice;
+  window.prepareServerBillingInvoice = prepareServerInvoice;
 })();
