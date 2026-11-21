@@ -106,10 +106,13 @@ export function getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding) {
 }
 
 export function getServerBillingDueDate(onboardDate, monthsAfterOnboarding) {
-  const anniversary = getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding);
-  const [year, month, day] = anniversary.split('-').map(Number);
-  const dueDate = new Date(Date.UTC(year, month - 1, day - 7));
-  return `${dueDate.getUTCFullYear()}-${String(dueDate.getUTCMonth() + 1).padStart(2, '0')}-${String(dueDate.getUTCDate()).padStart(2, '0')}`;
+  return getMonthlyAnniversaryDate(onboardDate, monthsAfterOnboarding);
+}
+
+function getDaysBefore(date, days) {
+  const [year, month, day] = date.split('-').map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day - days));
+  return `${result.getUTCFullYear()}-${String(result.getUTCMonth() + 1).padStart(2, '0')}-${String(result.getUTCDate()).padStart(2, '0')}`;
 }
 
 export function getServerBillingCycles(onboardDate, today = new Date().toISOString().slice(0, 10)) {
@@ -130,9 +133,13 @@ export function getServerBillingCycles(onboardDate, today = new Date().toISOStri
 
 export function buildServerBillingSchedule({ events, activeAccounts, invoices, clients, settings, today }) {
   const clientById = new Map((clients || []).map(client => [String(client.client_id || '').toUpperCase(), client]));
-  const invoiceByCycle = new Map((invoices || [])
-    .filter(invoice => invoice.billing_type === 'server_fee' && !invoice.deleted_at)
-    .map(invoice => [`${String(invoice.client_id).toUpperCase()}\u0000${invoice.server_billing_due_date}`, invoice]));
+  const invoiceByCycle = new Map();
+  for (const invoice of (invoices || []).filter(item => item.billing_type === 'server_fee' && !item.deleted_at && item.server_billing_due_date)) {
+    const accounts = String(invoice.account_number || '').split(',').map(value => value.trim()).filter(Boolean);
+    for (const accountNumber of accounts) {
+      invoiceByCycle.set(`${String(invoice.client_id).toUpperCase()}\u0000${invoice.server_billing_due_date}\u0000${accountNumber}`, invoice);
+    }
+  }
   const groups = new Map();
   for (const account of activeAccounts || []) {
     const clientId = String(account.client_id || '').toUpperCase();
@@ -151,31 +158,38 @@ export function buildServerBillingSchedule({ events, activeAccounts, invoices, c
     if (!client || client.deleted_at) continue;
     const onboardingDate = onboarding.server_billing_onboarding_date || String(onboarding.created_at).slice(0, 10);
     for (const [cycleIndex, cycle] of getServerBillingCycles(String(onboardingDate).slice(0, 10), today).entries()) {
-      const key = `${clientId}\u0000${cycle.due_date}`;
+      const key = `${clientId}\u0000${cycle.due_date}\u0000${accountNumber}`;
       const legacyDueDate = getMonthlyAnniversaryDate(String(onboardingDate).slice(0, 10), cycleIndex + 1);
-      const legacyInvoice = invoiceByCycle.get(`${clientId}\u0000${legacyDueDate}`);
+      const legacyInvoice = invoiceByCycle.get(`${clientId}\u0000${legacyDueDate}\u0000${accountNumber}`)
+        || invoiceByCycle.get(`${clientId}\u0000${getDaysBefore(legacyDueDate, 7)}\u0000${accountNumber}`);
       if (legacyInvoice && !invoiceByCycle.has(key)) invoiceByCycle.set(key, legacyInvoice);
       if (!groups.has(key)) {
         groups.set(key, {
           client_id: clientId,
           client_name: `${client.first_name || ''} ${client.second_name || ''}`.trim() || account.client_name,
-          account_numbers: [],
+          account_numbers: [accountNumber],
           due_date: cycle.due_date,
           overdue: cycle.overdue
         });
       }
-      groups.get(key).account_numbers.push(accountNumber);
     }
   }
   return [...groups.values()].map(group => {
-    group.account_numbers = [...new Set(group.account_numbers)].sort();
-    const invoice = invoiceByCycle.get(`${group.client_id}\u0000${group.due_date}`) || null;
+    const invoice = invoiceByCycle.get(`${group.client_id}\u0000${group.due_date}\u0000${group.account_numbers[0]}`) || null;
+    const legacyLineItems = typeof invoice?.custom_line_items === 'string'
+      ? JSON.parse(invoice.custom_line_items || '[]')
+      : invoice?.custom_line_items || [];
+    const legacyFeeLines = legacyLineItems.filter(line => String(line.description || '').startsWith('Monthly server fee · Account '));
+    const serverCostUsd = legacyFeeLines.length
+      ? legacyFeeLines.reduce((sum, line) => sum + Number(line.amount_usd || 0), 0)
+      : Number(invoice?.server_maintenance_usd || 0);
+    const serverCostInr = legacyFeeLines.length
+      ? legacyFeeLines.reduce((sum, line) => sum + Number(line.amount_inr || 0), 0)
+      : Number(invoice?.server_maintenance_amount || 0);
     return {
       ...group,
-      amount_usd: roundMoney(Number(settings.monthly_server_fee_usd) * group.account_numbers.length),
-      amount_inr: invoice
-        ? Number(invoice.amount)
-        : roundMoney(Number(settings.monthly_server_fee_usd) * group.account_numbers.length * Number(settings.usd_inr_rate)),
+      amount_usd: invoice ? serverCostUsd : null,
+      amount_inr: invoice ? serverCostInr : null,
       status: invoice ? (invoice.payment_status === 'paid' ? 'settled' : 'pending') : 'upcoming',
       invoice_id: invoice?.id || null,
       invoice_number: invoice?.invoice_number || null,
@@ -283,6 +297,8 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
   const accountNumber = String(input.account_number || '').trim();
   if (!accountNumber || accountNumber.length > 100) throw new Error('Choose a valid portfolio account number.');
   validateBillingInvoiceNumber(invoiceNumber, issueDate);
+  const serverBillingDueDate = input.server_billing_due_date ? String(input.server_billing_due_date).trim() : null;
+  if (serverBillingDueDate && !validIsoDate(serverBillingDueDate)) throw new Error('Choose a valid server billing due date.');
   const { periodStart, periodEnd } = getBillingPeriodDates(input);
   const amounts = calculateBillingAmounts(input, maintenanceAlreadyCharged);
   return {
@@ -290,12 +306,12 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
     ...clientInvoiceDetails(client),
     account_number: accountNumber,
     issue_date: issueDate,
-    due_date: periodEnd,
+    due_date: serverBillingDueDate || periodEnd,
     period_type: input.period_type,
     period_start: periodStart,
     period_end: periodEnd,
-    billing_type: 'standard',
-    server_billing_due_date: null,
+    billing_type: serverBillingDueDate ? 'server_fee' : 'standard',
+    server_billing_due_date: serverBillingDueDate,
     invoice_settings: normalizeBillingSettings(settings),
     payment_status: 'pending',
     paid_at: null,
