@@ -11,6 +11,7 @@ export function summarizePortfolio(events) {
   const previousWeekStart = currentWeekStart - 7 * 24 * 60 * 60 * 1000;
   const currentMonthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const previousMonthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
+  let currentWeekProfits = 0;
   let previousWeekProfits = 0;
   let previousMonthProfits = 0;
 
@@ -36,6 +37,7 @@ export function summarizePortfolio(events) {
     if (event.event_type === 'profit_withdrawn') {
       profitsWithdrawn += amount;
       const timestamp = new Date(event.created_at).getTime();
+      if (timestamp >= currentWeekStart) currentWeekProfits += amount;
       if (timestamp >= previousWeekStart && timestamp < currentWeekStart) previousWeekProfits += amount;
       if (timestamp >= previousMonthStart && timestamp < currentMonthStart) previousMonthProfits += amount;
     }
@@ -62,6 +64,7 @@ export function summarizePortfolio(events) {
       offboarded_accounts: offboardedAccounts.length,
       funds_withdrawn: roundMoney(fundsWithdrawn),
       profits_withdrawn: roundMoney(profitsWithdrawn),
+      current_week_profits_withdrawn: roundMoney(currentWeekProfits),
       previous_week_profits_withdrawn: roundMoney(previousWeekProfits),
       previous_month_profits_withdrawn: roundMoney(previousMonthProfits)
     },
