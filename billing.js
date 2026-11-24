@@ -83,12 +83,12 @@ export function getBillingPeriodDates(input) {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error('Choose a valid year.');
   if (!Number.isInteger(month) || month < 1 || month > 12) throw new Error('Choose a valid month.');
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const startDay = input.period_type === 'monthly' ? 1 : (week - 1) * 7 + 1;
-  if (!['weekly', 'monthly'].includes(input.period_type)) throw new Error('Choose weekly or monthly billing.');
+  const startDay = input.period_type === 'weekly' ? (week - 1) * 7 + 1 : 1;
+  if (!['weekly', 'monthly', 'onboard'].includes(input.period_type)) throw new Error('Choose weekly, monthly, or onboarding billing.');
   if (input.period_type === 'weekly' && (!Number.isInteger(week) || startDay < 1 || startDay > daysInMonth)) {
     throw new Error('Choose a valid week for the selected month.');
   }
-  const endDay = input.period_type === 'monthly' ? daysInMonth : Math.min(startDay + 6, daysInMonth);
+  const endDay = ['monthly', 'onboard'].includes(input.period_type) ? daysInMonth : Math.min(startDay + 6, daysInMonth);
   const date = day => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return { periodStart: date(startDay), periodEnd: date(endDay) };
 }
@@ -344,7 +344,7 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
     account_number: accountNumber,
     issue_date: issueDate,
     due_date: serverBillingDueDate || periodEnd,
-    period_type: input.period_type,
+    period_type: input.period_type === 'onboard' ? 'monthly' : input.period_type,
     period_start: periodStart,
     period_end: periodEnd,
     billing_type: serverBillingDueDate ? 'server_fee' : 'standard',
