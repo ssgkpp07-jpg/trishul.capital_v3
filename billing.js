@@ -334,7 +334,13 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
   const accountNumber = String(input.account_number || '').trim();
   if (!accountNumber || accountNumber.length > 100) throw new Error('Choose a valid portfolio account number.');
   validateBillingInvoiceNumber(invoiceNumber, issueDate);
-  const serverBillingDueDate = input.server_billing_due_date ? String(input.server_billing_due_date).trim() : null;
+  const isOnboardingInvoice = input.period_type === 'onboard';
+  if (isOnboardingInvoice && Number(input.server_maintenance_usd) <= 0) {
+    throw new Error('Enter a server cost greater than zero for an onboarding server bill.');
+  }
+  const serverBillingDueDate = input.server_billing_due_date
+    ? String(input.server_billing_due_date).trim()
+    : isOnboardingInvoice ? issueDate : null;
   if (serverBillingDueDate && !validIsoDate(serverBillingDueDate)) throw new Error('Choose a valid server billing due date.');
   const { periodStart, periodEnd } = getBillingPeriodDates(input);
   const amounts = calculateBillingAmounts(input, maintenanceAlreadyCharged);
@@ -347,7 +353,7 @@ export function createBillingInvoice(client, input, maintenanceAlreadyCharged = 
     period_type: input.period_type === 'onboard' ? 'monthly' : input.period_type,
     period_start: periodStart,
     period_end: periodEnd,
-    billing_type: serverBillingDueDate ? 'server_fee' : 'standard',
+    billing_type: isOnboardingInvoice || serverBillingDueDate ? 'server_fee' : 'standard',
     server_billing_due_date: serverBillingDueDate,
     invoice_settings: normalizeBillingSettings(settings),
     payment_status: 'pending',
