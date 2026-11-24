@@ -41,8 +41,10 @@
     .billing-checkbox{display:flex!important;align-items:center;gap:8px;margin:10px 0}
     .billing-checkbox input{width:auto!important}
     .billing-table-note{margin:8px 0 14px;color:#91a0b7;font-size:12px}
+    .billing-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(2,minmax(140px,1fr));gap:10px;margin:12px 0}
+    .billing-filters input,.billing-filters select{width:100%;margin:0}
     @media(max-width:850px){.billing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:560px){.billing-form,.billing-settings-grid{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
+    @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-filters{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
     .admin-nav button:nth-child(4)::before{content:"$"}
     .admin-nav button:nth-child(5)::before{content:"◉"}
     .admin-nav button:nth-child(6)::before{content:"⚙"}
@@ -99,6 +101,11 @@
         <button type="submit" class="billing-submit">Create invoice</button>
       </form>
       <h3>Invoices</h3>
+      <div class="billing-filters" role="search" aria-label="Filter invoices">
+        <input id="billingInvoiceSearch" type="search" placeholder="Search client name or account number" aria-label="Search invoices by client name or account number">
+        <select id="billingInvoiceMonth" aria-label="Filter invoices by month"><option value="">All months</option></select>
+        <select id="billingInvoiceYear" aria-label="Filter invoices by year"><option value="">All years</option></select>
+      </div>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
         <thead><tr><th>Invoice</th><th>Client</th><th>Account number</th><th>Period</th><th>Total (INR)</th><th>Payment</th><th>Actions</th></tr></thead>
         <tbody id="billingInvoiceRows"><tr><td colspan="7">Loading invoices…</td></tr></tbody>
@@ -107,6 +114,11 @@
     <section class="billing-view hidden" data-billing-view="audit">
       <h3>Payment audit</h3>
       <p class="billing-table-note">Verify the payment against your bank or UPI record, then mark the invoice paid. Verification is manual.</p>
+      <div class="billing-filters" role="search" aria-label="Filter payment audit">
+        <input id="billingAuditSearch" type="search" placeholder="Search client name or account number" aria-label="Search audit by client name or account number">
+        <select id="billingAuditMonth" aria-label="Filter audit by month"><option value="">All months</option></select>
+        <select id="billingAuditYear" aria-label="Filter audit by year"><option value="">All years</option></select>
+      </div>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
         <thead><tr><th>Invoice</th><th>Client</th><th>Account</th><th>Due date</th><th>Total (INR)</th><th>Payment status</th><th>Verified at</th><th>Action</th></tr></thead>
         <tbody id="billingAuditRows"><tr><td colspan="8">Loading audit…</td></tr></tbody>
@@ -208,6 +220,12 @@
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const monthSelect = document.getElementById('billingMonth');
   monthSelect.innerHTML = months.map((month, index) => `<option value="${index + 1}">${month}</option>`).join('');
+  for (const prefix of ['billingInvoice', 'billingAudit']) {
+    const filterMonth = document.getElementById(`${prefix}Month`);
+    filterMonth.innerHTML += months.map((month, index) =>
+      `<option value="${String(index + 1).padStart(2, '0')}">${month}</option>`
+    ).join('');
+  }
   const clientSelect = document.getElementById('billingClientId');
   const accountSelect = document.getElementById('billingAccountNumber');
   const message = document.getElementById('billingMsg');
@@ -338,7 +356,7 @@
 
   function renderBillingSchedule() {
     const rows = document.getElementById('billingScheduleRows');
-    rows.innerHTML = serverCycles.map(cycle => {
+    rows.innerHTML = serverCycles.filter(cycle => cycle.status === 'upcoming' || cycle.status === 'pending').map(cycle => {
       const action = cycle.invoice_id
         ? `<button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(cycle.invoice_id)})">Preview invoice</button>`
         : `<button type="button" class="portfolio-action" onclick="prepareServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${encodeURIComponent(cycle.account_numbers[0]).replace(/'/g, '%27')}','${cycle.due_date}')">Create invoice</button>`;
@@ -350,16 +368,39 @@
         <td>${cycle.amount_inr == null ? '<span class="muted">Set in invoice</span>' : moneyInr(cycle.amount_inr)}</td>
         <td>${statusBadge(cycle.status, cycle.overdue)}</td><td><div class="billing-actions">${action}</div></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="7">No active accounts have monthly server billing enabled.</td></tr>';
+    }).join('') || '<tr><td colspan="7">No upcoming or pending server billing cycles.</td></tr>';
   }
 
   function invoicePaymentLabel(invoice) {
     return invoice.payment_status === 'paid' ? statusBadge('paid') : statusBadge('pending');
   }
 
+  function filterBillingRecords(records, prefix, dateKey) {
+    const search = document.getElementById(`${prefix}Search`).value.trim().toLocaleLowerCase();
+    const monthSelect = document.getElementById(`${prefix}Month`);
+    const yearSelect = document.getElementById(`${prefix}Year`);
+    const selectedMonth = monthSelect.value;
+    const selectedYear = yearSelect.value;
+    const years = [...new Set(records.map(invoice => String(invoice[dateKey] || '').slice(0, 4))
+      .filter(year => /^\d{4}$/.test(year)))].sort((left, right) => right.localeCompare(left));
+    yearSelect.innerHTML = '<option value="">All years</option>' + years.map(year =>
+      `<option value="${year}">${year}</option>`
+    ).join('');
+    yearSelect.value = years.includes(selectedYear) ? selectedYear : '';
+    const month = monthSelect.value;
+    const year = yearSelect.value;
+    return records.filter(invoice => {
+      const haystack = `${invoice.client_name || ''} ${invoice.client_id || ''} ${invoice.account_number || ''}`.toLocaleLowerCase();
+      const date = String(invoice[dateKey] || '');
+      return (!search || haystack.includes(search)) &&
+        (!month || date.slice(5, 7) === month) &&
+        (!year || date.slice(0, 4) === year);
+    });
+  }
+
   function renderInvoiceRows() {
     const rows = document.getElementById('billingInvoiceRows');
-    rows.innerHTML = invoices.map(invoice => {
+    rows.innerHTML = filterBillingRecords(invoices, 'billingInvoice', 'period_start').map(invoice => {
       const emailDisabled = !invoice.client_email;
       const phoneDisabled = !invoice.client_phone;
       return `<tr>
@@ -376,12 +417,12 @@
           <button type="button" class="danger portfolio-action" onclick="deleteBillingInvoice(${Number(invoice.id)})">Delete</button>
         </div></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="7">No invoices yet. Create one above using a registered client.</td></tr>';
+    }).join('') || `<tr><td colspan="7">${invoices.length ? 'No invoices match these filters.' : 'No invoices yet. Create one above using a registered client.'}</td></tr>`;
   }
 
   function renderAuditRows() {
     const rows = document.getElementById('billingAuditRows');
-    rows.innerHTML = auditInvoices.map(invoice => `<tr>
+    rows.innerHTML = filterBillingRecords(auditInvoices, 'billingAudit', 'due_date').map(invoice => `<tr>
       <td>${escapeHtml(invoice.invoice_number)}</td>
       <td>${escapeHtml(invoice.client_id)} · ${escapeHtml(invoice.client_name)}</td>
       <td>${escapeHtml(invoice.account_number || '—')}</td>
@@ -393,7 +434,7 @@
         ${invoice.payment_status === 'paid' ? 'Verified' : `<button type="button" class="portfolio-action" onclick="markBillingInvoicePaid(${Number(invoice.id)})">Verify / mark paid</button>`}
         <button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(invoice.id)})">Preview</button>
       </div></td>
-    </tr>`).join('') || '<tr><td colspan="8">No invoices to audit.</td></tr>';
+    </tr>`).join('') || `<tr><td colspan="8">${auditInvoices.length ? 'No invoices match these filters.' : 'No invoices to audit.'}</td></tr>`;
   }
 
   function renderDeletedInvoices(deleted) {
@@ -676,6 +717,12 @@
     billingPdfPreviewUrl = '';
   });
   document.getElementById('billingRefresh').addEventListener('click', loadBilling);
+  document.getElementById('billingInvoiceSearch').addEventListener('input', renderInvoiceRows);
+  document.getElementById('billingInvoiceMonth').addEventListener('change', renderInvoiceRows);
+  document.getElementById('billingInvoiceYear').addEventListener('change', renderInvoiceRows);
+  document.getElementById('billingAuditSearch').addEventListener('input', renderAuditRows);
+  document.getElementById('billingAuditMonth').addEventListener('change', renderAuditRows);
+  document.getElementById('billingAuditYear').addEventListener('change', renderAuditRows);
   document.getElementById('billingAddLine').addEventListener('click', addBillingLine);
   document.getElementById('billingClearScheduledCycle').addEventListener('click', clearScheduledCycle);
   document.querySelectorAll('[data-billing-view-button]').forEach(button =>
