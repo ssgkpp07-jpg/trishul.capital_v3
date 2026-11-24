@@ -204,6 +204,7 @@ export default async function handler(req, res) {
 
       if (method === 'POST' && path === '/api/admin/billing/invoices') {
         const input = bodyOf(req);
+        const issueDate = new Date().toISOString().slice(0, 10);
         const clientId = String(input.client_id || '').trim().toUpperCase();
         const { data: client, error: clientError } = await supabase.from('portfolio_clients').select('*')
           .eq('client_id', clientId).is('deleted_at', null).maybeSingle();
@@ -216,7 +217,8 @@ export default async function handler(req, res) {
         if (accountError) throw accountError;
         if (!registeredAccount) return res.status(404).json({ message: 'Choose an account number linked to this registered client in Portfolio.' });
 
-        const scheduledDueDate = String(input.server_billing_due_date || '').trim();
+        const scheduledDueDate = String(input.server_billing_due_date || '').trim()
+          || (input.period_type === 'onboard' ? issueDate : '');
         let monthInvoices = [];
         if (scheduledDueDate && input.period_type !== 'onboard') {
           const parsedDueDate = new Date(`${scheduledDueDate}T00:00:00.000Z`);
@@ -244,7 +246,7 @@ export default async function handler(req, res) {
         try { period = getBillingPeriodDates(input); } catch (error) {
           return res.status(400).json({ message: error.message });
         }
-        if (!scheduledDueDate) {
+        if (!scheduledDueDate && input.period_type !== 'onboard') {
           const monthStart = `${period.periodStart.slice(0, 7)}-01`;
           const monthEndDay = new Date(Date.UTC(Number(period.periodStart.slice(0, 4)), Number(period.periodStart.slice(5, 7)), 0)).getUTCDate();
           const monthEnd = `${period.periodStart.slice(0, 7)}-${String(monthEndDay).padStart(2, '0')}`;
@@ -263,13 +265,12 @@ export default async function handler(req, res) {
         }
 
         const settings = await getBillingSettings();
-        const issueDate = new Date().toISOString().slice(0, 10);
         const [issueYear, issueMonth] = issueDate.slice(0, 7).split('-').map(Number);
         let invoice;
         try {
           invoice = createBillingInvoice(
             client,
-            input,
+            { ...input, server_billing_due_date: scheduledDueDate || null },
             !scheduledDueDate && monthInvoices.some(item => Number(item.server_maintenance_usd) > 0),
             settings,
             formatBillingInvoiceNumber(issueYear, issueMonth, 1),
