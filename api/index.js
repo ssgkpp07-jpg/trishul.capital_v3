@@ -696,7 +696,7 @@ export default async function handler(req, res) {
       const amount = Number(input.amount);
       const createdAt = input.created_at ? new Date(input.created_at) : new Date();
       const serverBillingEnabled = type === 'onboarded' && input.server_billing_enabled === true;
-      if (!['onboarded', 'profit_withdrawn'].includes(type)) return res.status(400).json({ message: 'Choose onboarding or profit withdrawal' });
+      if (!['onboarded', 'funds_added', 'profit_withdrawn'].includes(type)) return res.status(400).json({ message: 'Choose onboarding, added funds, or profit withdrawal' });
       if (!clientId || !accountNumber) return res.status(400).json({ message: 'Client ID and account number are required' });
       if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: 'Enter an amount greater than zero' });
       if (Number.isNaN(createdAt.getTime())) return res.status(400).json({ message: 'Enter a valid date and time' });
@@ -714,6 +714,7 @@ export default async function handler(req, res) {
       const portfolio = await getPortfolio();
       const active = portfolio.active_accounts.find(account => account.account_number === accountNumber);
       if (active && active.client_id !== clientId) return res.status(409).json({ message: 'This account number belongs to a different Client ID' });
+      if (type === 'funds_added' && !active) return res.status(400).json({ message: 'Added funds require an active account for this Client ID' });
       if (type === 'profit_withdrawn' && !active) return res.status(400).json({ message: 'Profit withdrawals require an active account' });
       const { error } = await supabase.from('portfolio_events').insert({
         event_type: type === 'onboarded' && active ? 'funds_added' : type,
