@@ -81,6 +81,13 @@ test('weekly billing dates stop at the end of the selected month', () => {
     periodStart: '2024-02-29',
     periodEnd: '2024-02-29'
   });
+
+  test('onboarding billing period resolves to the selected month', () => {
+    assert.deepEqual(getBillingPeriodDates({ period_type: 'onboard', year: 2026, month: 11 }), {
+      periodStart: '2026-11-01',
+      periodEnd: '2026-11-30'
+    });
+  });
   assert.throws(() => getBillingPeriodDates({ period_type: 'weekly', year: 2023, month: 2, week: 5 }), /valid week/);
 });
 
