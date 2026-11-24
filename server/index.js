@@ -339,13 +339,14 @@ app.get('/api/admin/billing/audit',auth,(req,res)=>res.json({invoices:db.prepare
 app.get('/api/admin/billing/deleted-invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT * FROM billing_invoices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC,id DESC').all().map(readBillingInvoice)}));
 app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  const input=req.body||{},clientId=String(input.client_id||'').trim().toUpperCase();
+ const issueDate=new Date().toISOString().slice(0,10);
  const client=db.prepare('SELECT * FROM portfolio_clients WHERE client_id=? AND deleted_at IS NULL').get(clientId);
  if(!client)return res.status(404).json({message:'Choose an active registered client before creating an invoice.'});
  const accountNumber=String(input.account_number||'').trim();
  if(!accountNumber)return res.status(400).json({message:'Choose an account number for this invoice.'});
  const registeredAccount=db.prepare('SELECT 1 FROM portfolio_events WHERE client_id=? AND account_number=? AND deleted_at IS NULL LIMIT 1').get(clientId,accountNumber);
  if(!registeredAccount)return res.status(404).json({message:'Choose an account number linked to this registered client in Portfolio.'});
- const scheduledDueDate=String(input.server_billing_due_date||'').trim();
+ const scheduledDueDate=String(input.server_billing_due_date||'').trim()||(input.period_type==='onboard'?issueDate:'');
  let monthInvoices=[];
  if(scheduledDueDate&&input.period_type!=='onboard'){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate)||Number.isNaN(new Date(`${scheduledDueDate}T00:00:00.000Z`).getTime())||new Date(`${scheduledDueDate}T00:00:00.000Z`).toISOString().slice(0,10)!==scheduledDueDate)return res.status(400).json({message:'Choose a valid server billing due date.'});
@@ -355,15 +356,15 @@ app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  }
  let period;
  try{period=getBillingPeriodDates(input)}catch(error){return res.status(400).json({message:error.message})}
- if(!scheduledDueDate){
+ if(!scheduledDueDate&&input.period_type!=='onboard'){
   const monthStart=`${period.periodStart.slice(0,7)}-01`,monthEnd=`${period.periodStart.slice(0,7)}-${String(new Date(Date.UTC(Number(period.periodStart.slice(0,4)),Number(period.periodStart.slice(5,7)),0)).getUTCDate()).padStart(2,'0')}`;
   monthInvoices=db.prepare("SELECT period_type,period_start,server_maintenance_usd FROM billing_invoices WHERE client_id=? AND billing_type='standard' AND deleted_at IS NULL AND period_start>=? AND period_start<=?").all(clientId,monthStart,monthEnd);
   if(monthInvoices.some(invoice=>invoice.period_type!==input.period_type))return res.status(409).json({message:'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.'});
   if(monthInvoices.some(invoice=>invoice.period_type===input.period_type&&invoice.period_start===period.periodStart))return res.status(409).json({message:'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.'});
  }
  let invoice;
- const issueDate=new Date().toISOString().slice(0,10),[issueYear,issueMonth]=issueDate.slice(0,7).split('-').map(Number);
- try{invoice=createBillingInvoice(client,input,!scheduledDueDate&&monthInvoices.some(item=>Number(item.server_maintenance_usd)>0),readBillingSettings(),formatBillingInvoiceNumber(issueYear,issueMonth,1),issueDate)}
+ const [issueYear,issueMonth]=issueDate.slice(0,7).split('-').map(Number);
+ try{invoice=createBillingInvoice(client,{...input,server_billing_due_date:scheduledDueDate||null},!scheduledDueDate&&monthInvoices.some(item=>Number(item.server_maintenance_usd)>0),readBillingSettings(),formatBillingInvoiceNumber(issueYear,issueMonth,1),issueDate)}
  catch(error){return res.status(400).json({message:error.message})}
  let saved;
  try{saved=saveBillingInvoice(invoice)}
