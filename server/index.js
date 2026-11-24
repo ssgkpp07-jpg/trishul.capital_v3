@@ -347,7 +347,7 @@ app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  if(!registeredAccount)return res.status(404).json({message:'Choose an account number linked to this registered client in Portfolio.'});
  const scheduledDueDate=String(input.server_billing_due_date||'').trim();
  let monthInvoices=[];
- if(scheduledDueDate){
+ if(scheduledDueDate&&input.period_type!=='onboard'){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate)||Number.isNaN(new Date(`${scheduledDueDate}T00:00:00.000Z`).getTime())||new Date(`${scheduledDueDate}T00:00:00.000Z`).toISOString().slice(0,10)!==scheduledDueDate)return res.status(400).json({message:'Choose a valid server billing due date.'});
   const cycle=buildServerBillingOverview(new Date().toISOString().slice(0,10),readBillingSettings()).find(item=>item.client_id===clientId&&item.due_date===scheduledDueDate&&item.account_numbers.includes(accountNumber));
   if(!cycle)return res.status(400).json({message:'This account does not have an enabled server billing cycle for that due date.'});
