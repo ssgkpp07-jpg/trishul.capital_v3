@@ -218,7 +218,7 @@ export default async function handler(req, res) {
 
         const scheduledDueDate = String(input.server_billing_due_date || '').trim();
         let monthInvoices = [];
-        if (scheduledDueDate) {
+        if (scheduledDueDate && input.period_type !== 'onboard') {
           const parsedDueDate = new Date(`${scheduledDueDate}T00:00:00.000Z`);
           if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate) || Number.isNaN(parsedDueDate.getTime()) || parsedDueDate.toISOString().slice(0, 10) !== scheduledDueDate) {
             return res.status(400).json({ message: 'Choose a valid server billing due date.' });
