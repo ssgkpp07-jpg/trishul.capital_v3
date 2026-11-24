@@ -279,7 +279,7 @@
   function updateBillingPeriod() {
     const periodType = document.getElementById('billingPeriodType').value;
     document.getElementById('billingWeekField').classList.toggle('hidden', periodType !== 'weekly');
-    document.getElementById('billingScheduledCycleNote').classList.toggle('hidden', periodType !== 'onboard' && !scheduledServerBillingDueDate);
+    document.getElementById('billingScheduledCycleNote').classList.toggle('hidden', !scheduledServerBillingDueDate);
   }
 
   function renderBillingClients() {
@@ -774,7 +774,9 @@
       server_maintenance_usd: Number(document.getElementById('billingMaintenance').value),
       usd_inr_rate: Number(document.getElementById('billingRate').value),
       custom_line_items: customLines,
-      server_billing_due_date: scheduledServerBillingDueDate || null
+      server_billing_due_date: document.getElementById('billingPeriodType').value === 'onboard'
+        ? scheduledServerBillingDueDate || new Date().toISOString().slice(0, 10)
+        : scheduledServerBillingDueDate || null
     };
     submit.disabled = true;
     try {
