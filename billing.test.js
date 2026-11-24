@@ -162,6 +162,22 @@ test('server fee schedules are tracked per account and invoice values are entere
   assert.equal(invoice.usd_inr_rate, 80);
   assert.equal(invoice.amount, 2400);
 
+  const onboardingInvoice = createBillingInvoice(client, {
+    account_number: 'ACC-1',
+    period_type: 'onboard', year: 2024, month: 2,
+    withdrawal_profit_usd: 0, profit_split_percent: 0,
+    server_maintenance_usd: 25, usd_inr_rate: 80
+  }, false, undefined, 'INV-TC-002/02/2024', '2024-02-15');
+  assert.equal(onboardingInvoice.billing_type, 'server_fee');
+  assert.equal(onboardingInvoice.server_billing_due_date, '2024-02-15');
+  assert.equal(onboardingInvoice.due_date, '2024-02-15');
+  assert.throws(() => createBillingInvoice(client, {
+    account_number: 'ACC-1',
+    period_type: 'onboard', year: 2024, month: 2,
+    withdrawal_profit_usd: 0, profit_split_percent: 0,
+    server_maintenance_usd: 0, usd_inr_rate: 80
+  }, false, undefined, 'INV-TC-003/02/2024', '2024-02-15'), /server cost greater than zero/i);
+
   const cycles = buildServerBillingSchedule({
     events: ['ACC-1', 'ACC-2'].map((account_number, index) => ({
       id: index + 1,
@@ -264,6 +280,15 @@ test('invoice PDF generation returns a PDF document', async () => {
     payment_reference: 'TEST-REFERENCE'
   });
   assert.equal(pdf.subarray(0, 4).toString('ascii'), '%PDF');
-  assert.ok(pdf.includes(Buffer.from('/pay/index.html?')));
+  assert.equal(pdf.includes(Buffer.from('/pay/index.html?')), false);
+  assert.ok(pdf.includes(Buffer.from('/Subtype /Image')));
+
+  const pendingPdf = await createBillingPdf({
+    ...invoice,
+    invoice_settings: { ...invoice.invoice_settings, upi_id: 'merchant@okaxis' },
+    payment_status: 'pending'
+  });
+  assert.ok(pendingPdf.includes(Buffer.from('/pay/index.html?')));
+  assert.equal(pendingPdf.includes(Buffer.from('/Subtype /Image')), false);
   assert.match(pdf.toString('latin1'), /\/Count 1\b/);
 });
