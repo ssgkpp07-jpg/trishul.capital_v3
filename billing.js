@@ -1,6 +1,9 @@
 import PDFDocument from 'pdfkit';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const roundMoney = amount => Math.round((amount + Number.EPSILON) * 100) / 100;
+const PAID_STAMP = readFileSync(path.join(process.cwd(), 'public', 'admin', 'assets', 'paid-stamp.png'));
 const BILLING_SETTING_FIELDS = [
   'logo_data_url', 'upi_id', 'upi_qr_data_url', 'bank_account_number', 'bank_account_name',
   'bank_name', 'bank_branch', 'bank_ifsc', 'company_name', 'company_address',
@@ -475,14 +478,6 @@ export function createBillingPdf(invoice) {
         width: right - 270, align: 'right', lineGap: 2
       });
 
-    if (invoice.payment_status === 'paid') {
-      document.save();
-      document.rotate(-35, { origin: [right - 55, 62] });
-      document.fillColor('#eaf6ed').rect(right - 115, 36, 112, 24).fill();
-      document.fillColor('#24743a').font('Helvetica-Bold').fontSize(13).text('PAID', right - 102, 41, { width: 84, align: 'center' });
-      document.restore();
-    }
-
     document.rect(left, 127, contentWidth, 48).fill('#f0f1f3');
     const headerTitleWidth = 130;
     const headerTitleX = left + (contentWidth - headerTitleWidth) / 2;
@@ -556,12 +551,16 @@ export function createBillingPdf(invoice) {
       settings.bank_ifsc ? `IFSC: ${settings.bank_ifsc}` : ''
     ].filter(Boolean);
     const bankDetailsX = qr ? left + 105 : left;
-    const bankDetailsWidth = paymentPageUrl ? right - bankDetailsX - 212 : qr ? 300 : contentWidth;
+    const bankDetailsWidth = paymentPageUrl || invoice.payment_status === 'paid'
+      ? right - bankDetailsX - 212
+      : qr ? 300 : contentWidth;
     document.font('Helvetica').fillColor('#333').fontSize(8).text(
       bankDetails.length ? bankDetails.join('\n') : 'Contact us for payment instructions.',
       bankDetailsX, rowY + 2, { width: bankDetailsWidth, lineGap: 4 }
     );
-    if (paymentPageUrl) {
+    if (invoice.payment_status === 'paid') {
+      document.image(PAID_STAMP, right - 145, rowY - 2, { fit: [90, 80] });
+    } else if (paymentPageUrl) {
       const buttonX = right - 200;
       const buttonY = rowY + 2;
       document.roundedRect(buttonX, buttonY, 200, 42, 6).fill('#168447');
