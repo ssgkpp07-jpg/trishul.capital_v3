@@ -165,7 +165,9 @@ export default async function handler(req, res) {
         const settings = await getBillingSettings();
         const [portfolio, invoiceResult, clientResult] = await Promise.all([
           getPortfolio(),
-          supabase.from('billing_invoices').select('*').eq('billing_type', 'server_fee').is('deleted_at', null),
+          supabase.from('billing_invoices')
+            .select('id,client_id,client_name,account_number,billing_type,deleted_at,server_billing_due_date,invoice_number,payment_status,custom_line_items,server_maintenance_usd,server_maintenance_amount')
+            .eq('billing_type', 'server_fee').is('deleted_at', null),
           supabase.from('portfolio_clients').select('client_id,first_name,second_name,email,whatsapp_number,deleted_at').is('deleted_at', null)
         ]);
         if (invoiceResult.error) throw invoiceResult.error;
@@ -178,19 +180,19 @@ export default async function handler(req, res) {
           settings,
           today: new Date().toISOString().slice(0, 10)
         });
-        return res.status(200).json({ settings, cycles });
+        return res.status(200).json({ settings, cycles, portfolio });
       }
 
       if (method === 'GET' && path === '/api/admin/billing/invoices') {
         const { data, error } = await supabase.from('billing_invoices').select('*')
-          .is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
+          .is('deleted_at', null).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
       }
 
       if (method === 'GET' && path === '/api/admin/billing/audit') {
         const { data, error } = await supabase.from('billing_invoices').select('*')
-          .is('deleted_at', null).order('payment_status').order('due_date').limit(500);
+          .is('deleted_at', null).order('payment_status').order('due_date').order('id').limit(500);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
       }
