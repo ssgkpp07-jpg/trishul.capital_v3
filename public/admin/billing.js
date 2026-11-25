@@ -477,8 +477,8 @@
         ${invoice.payment_status === 'paid' ? 'Verified' : `<button type="button" class="portfolio-action" onclick="markBillingInvoicePaid(${Number(invoice.id)})">Verify / mark paid</button>`}
         <button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(invoice.id)})">Preview</button>
         <button type="button" class="portfolio-action" onclick="downloadBillingPdf(${Number(invoice.id)},'${escapeHtml(invoice.invoice_number)}')">Download PDF</button>
-        <button type="button" class="portfolio-action" ${emailDisabled ? 'disabled title="No client email saved"' : `onclick="prepareBillingEmail(${Number(invoice.id)})"`}>Email draft</button>
-        <button type="button" class="portfolio-action" ${phoneDisabled ? 'disabled title="No client WhatsApp saved"' : `onclick="prepareBillingWhatsApp(${Number(invoice.id)})"`}>WhatsApp draft</button>
+        <button type="button" class="portfolio-action" ${emailDisabled ? 'disabled title="No client email saved"' : `onclick="prepareBillingAuditEmail(${Number(invoice.id)})"`}>Email draft</button>
+        <button type="button" class="portfolio-action" ${phoneDisabled ? 'disabled title="No client WhatsApp saved"' : `onclick="prepareBillingAuditWhatsApp(${Number(invoice.id)})"`}>WhatsApp draft</button>
       </div></td>
     </tr>`;
     }).join('') || `<tr><td colspan="8">${auditInvoices.length ? 'No invoices match these filters.' : 'No invoices to audit.'}</td></tr>`;
@@ -629,6 +629,25 @@
     const text = `Hello ${invoice.client_name},\n\nInvoice ${invoice.invoice_number} for account ${invoice.account_number || '—'} is ready. Amount: ${moneyInr(invoice.amount)}. Due date: ${invoice.due_date}.\n\nPlease find the PDF attached.`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
     setBillingMessage('WhatsApp draft opened. Attach the downloaded invoice PDF yourself before sending.');
+  }
+
+  async function preparePaidEmail(invoice) {
+    if (!invoice?.client_email) return setBillingMessage('This client does not have an email address saved.', true);
+    const company = billingSettings.company_name || 'Trishul Capital';
+    const subject = `Payment received — Invoice ${invoice.invoice_number}`;
+    const body = `Hello ${invoice.client_name},\n\nWe confirm that your payment of ${moneyInr(invoice.amount)} for invoice ${invoice.invoice_number} (Account: ${invoice.account_number || '—'}) has been received and verified.\n\nPayment status: Paid\n\nThank you,\n${company}`;
+    const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(invoice.client_email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(url, '_blank', 'noopener');
+    setBillingMessage('Payment confirmation email draft opened. Download the paid invoice PDF and attach it yourself before sending.');
+  }
+
+  async function preparePaidWhatsApp(invoice) {
+    const phone = String(invoice?.client_phone || '').replace(/\D/g, '');
+    if (!phone) return setBillingMessage('This client does not have a WhatsApp number saved.', true);
+    const company = billingSettings.company_name || 'Trishul Capital';
+    const text = `Hello ${invoice.client_name},\n\nWe confirm that your payment of ${moneyInr(invoice.amount)} for invoice ${invoice.invoice_number} (Account: ${invoice.account_number || '—'}) has been received and verified.\n\nPayment status: Paid\n\nThank you,\n${company}`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    setBillingMessage('Payment confirmation WhatsApp draft opened. Attach the paid invoice PDF yourself before sending.');
   }
 
   async function downloadBillingPdf(id, invoiceNumber) {
@@ -872,6 +891,14 @@
   window.downloadBillingPdf = downloadBillingPdf;
   window.prepareBillingEmail = async id => prepareEmail([...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id)));
   window.prepareBillingWhatsApp = async id => prepareWhatsApp([...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id)));
+  window.prepareBillingAuditEmail = async id => {
+    const invoice = auditInvoices.find(item => Number(item.id) === Number(id)) || invoices.find(item => Number(item.id) === Number(id));
+    return invoice?.payment_status === 'paid' ? preparePaidEmail(invoice) : prepareEmail(invoice);
+  };
+  window.prepareBillingAuditWhatsApp = async id => {
+    const invoice = auditInvoices.find(item => Number(item.id) === Number(id)) || invoices.find(item => Number(item.id) === Number(id));
+    return invoice?.payment_status === 'paid' ? preparePaidWhatsApp(invoice) : prepareWhatsApp(invoice);
+  };
   window.markBillingInvoicePaid = markInvoicePaid;
   window.deleteBillingInvoice = removeInvoice;
   window.permanentlyDeleteBillingInvoice = permanentlyRemoveInvoice;
