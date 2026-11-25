@@ -89,7 +89,7 @@
         <div><label for="billingClientId">Registered client</label><select id="billingClientId" required><option value="">Choose a client</option></select></div>
         <div><label for="billingAccountNumber">Account number</label><select id="billingAccountNumber" required disabled><option value="">Choose a client first</option></select></div>
         <p id="billingAccountHint" class="billing-help hidden" role="status"></p>
-        <div><label for="billingPeriodType">Billing period</label><select id="billingPeriodType" required><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="onboard">Onboard</option></select></div>
+        <div><label for="billingPeriodType">Billing period</label><select id="billingPeriodType" required><option value="instant">Instant</option><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="onboard">Onboard</option></select></div>
         <div><label for="billingYear">Year</label><input id="billingYear" type="number" min="2000" max="2100" required></div>
         <div><label for="billingMonth">Month</label><select id="billingMonth" required></select></div>
         <div id="billingWeekField" class="billing-week-field hidden"><label for="billingWeek">Week of month</label><select id="billingWeek"></select></div>
