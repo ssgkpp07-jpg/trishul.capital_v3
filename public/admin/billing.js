@@ -562,10 +562,9 @@
   async function loadBilling() {
     renderBillingClients();
     try {
-      const [invoiceData, auditData, portfolio, settingsData, overview] = await Promise.all([
+      const [invoiceData, auditData, settingsData, overview] = await Promise.all([
         apiRequest('/api/admin/billing/invoices'),
         apiRequest('/api/admin/billing/audit'),
-        apiRequest('/api/admin/portfolio'),
         apiRequest('/api/admin/billing/settings'),
         apiRequest('/api/admin/billing/overview')
       ]);
@@ -580,7 +579,7 @@
         billingSettings = saved.settings;
       }
       serverCycles = overview.cycles || [];
-      readBillingAccounts(portfolio);
+      readBillingAccounts(overview.portfolio);
       renderSettings();
       renderInvoiceRows();
       renderAuditRows();
