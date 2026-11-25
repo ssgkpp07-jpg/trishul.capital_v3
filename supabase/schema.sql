@@ -103,6 +103,7 @@ alter table portfolio_events add column if not exists server_billing_enabled boo
 alter table portfolio_events add column if not exists server_billing_onboarding_date date;
 
 create index if not exists portfolio_events_account_created_idx on portfolio_events(account_number, created_at desc);
+create index if not exists portfolio_events_created_id_idx on portfolio_events(created_at desc, id desc);
 alter table portfolio_events drop constraint if exists portfolio_events_event_type_check;
 alter table portfolio_events add constraint portfolio_events_event_type_check check (event_type in ('onboarded', 'funds_added', 'offboarded', 'profit_withdrawn'));
 
@@ -158,7 +159,13 @@ alter table billing_invoices drop constraint if exists billing_invoices_period_t
 alter table billing_invoices add constraint billing_invoices_period_type_check
   check (period_type in ('weekly', 'monthly', 'instant'));
 
-create index if not exists billing_invoices_created_idx on billing_invoices(created_at desc);
+drop index if exists billing_invoices_created_idx;
+create index if not exists billing_invoices_active_created_idx
+  on billing_invoices(created_at desc, id desc)
+  where deleted_at is null;
+create index if not exists billing_invoices_active_audit_idx
+  on billing_invoices(payment_status, due_date, id)
+  where deleted_at is null;
 create index if not exists billing_invoices_client_period_idx on billing_invoices(client_id, period_start desc);
 drop index if exists billing_invoices_standard_period_idx;
 create index if not exists billing_invoices_standard_period_idx
