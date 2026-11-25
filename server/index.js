@@ -16,7 +16,7 @@ if(billingInvoiceSql.includes('UNIQUE(client_id,period_start,period_type)')||bil
 for(const [column,definition] of [['billing_type',"TEXT NOT NULL DEFAULT 'standard'"],['server_billing_due_date','TEXT'],['invoice_settings',"TEXT NOT NULL DEFAULT '{}'"],['payment_status',"TEXT NOT NULL DEFAULT 'pending'"],['paid_at','TEXT'],['payment_method','TEXT'],['payment_reference','TEXT'],['delivery_status',"TEXT NOT NULL DEFAULT 'not_sent'"],['deleted_at','TEXT']]){
  if(!db.prepare('PRAGMA table_info(billing_invoices)').all().some(item=>item.name===column))db.exec(`ALTER TABLE billing_invoices ADD COLUMN ${column} ${definition}`);
 }
-db.exec('DROP INDEX IF EXISTS billing_invoices_standard_period_idx;CREATE INDEX IF NOT EXISTS billing_invoices_standard_period_idx ON billing_invoices(client_id,period_start,period_type) WHERE billing_type=\'standard\' AND deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_created_idx ON billing_invoices(created_at DESC);CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC)');
+db.exec('DROP INDEX IF EXISTS billing_invoices_standard_period_idx;CREATE INDEX IF NOT EXISTS billing_invoices_standard_period_idx ON billing_invoices(client_id,period_start,period_type) WHERE billing_type=\'standard\' AND deleted_at IS NULL;DROP INDEX IF EXISTS billing_invoices_created_idx;CREATE INDEX IF NOT EXISTS billing_invoices_active_created_idx ON billing_invoices(created_at DESC,id DESC) WHERE deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_active_audit_idx ON billing_invoices(payment_status,due_date,id) WHERE deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC)');
 const serverCycleIndexColumns=db.prepare("PRAGMA index_info('billing_invoices_server_cycle_idx')").all().map(column=>column.name);
 if(serverCycleIndexColumns.join(',')!=='client_id,server_billing_due_date,account_number')db.exec('DROP INDEX IF EXISTS billing_invoices_server_cycle_idx;CREATE UNIQUE INDEX billing_invoices_server_cycle_idx ON billing_invoices(client_id,server_billing_due_date,account_number) WHERE billing_type=\'server_fee\' AND deleted_at IS NULL');
 db.exec('CREATE TABLE IF NOT EXISTS billing_invoice_sequences(issue_year INTEGER NOT NULL,issue_month INTEGER NOT NULL,last_sequence INTEGER NOT NULL CHECK(last_sequence>0),PRIMARY KEY(issue_year,issue_month))');
@@ -37,7 +37,7 @@ if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.
 if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.name==='client_id'))db.exec('ALTER TABLE portfolio_events ADD COLUMN client_id TEXT');
 if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.name==='server_billing_enabled'))db.exec('ALTER TABLE portfolio_events ADD COLUMN server_billing_enabled INTEGER NOT NULL DEFAULT 0');
 if(!db.prepare('PRAGMA table_info(portfolio_events)').all().some(column=>column.name==='server_billing_onboarding_date'))db.exec('ALTER TABLE portfolio_events ADD COLUMN server_billing_onboarding_date TEXT');
-db.exec('CREATE INDEX IF NOT EXISTS portfolio_events_account_created_idx ON portfolio_events(account_number,created_at DESC)');
+db.exec('CREATE INDEX IF NOT EXISTS portfolio_events_account_created_idx ON portfolio_events(account_number,created_at DESC);CREATE INDEX IF NOT EXISTS portfolio_events_created_id_idx ON portfolio_events(created_at DESC,id DESC)');
 try{db.exec('ALTER TABLE accounts ADD COLUMN portfolio_image TEXT')}catch{}
 for(const [k,v] of [['contact_email','contact@trishulcapital.com'],['contact_whatsapp',''],['contact_telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run(k,v);if(!db.prepare('SELECT COUNT(*) c FROM socials').get().c)for(const x of [['Instagram',''],['WhatsApp',''],['Telegram','https://t.me/Trishul_Capital_Bot']])db.prepare('INSERT INTO socials(platform,url) VALUES(?,?)').run(...x);
 const contactCardProfileDefaults={title:'Trishul Capital',subtitle:'Account Management & Expert Advisor Services',tagline:'AUTOMATED · SYSTEMATIC · TRANSPARENT',logo:'/images/trident.png'};
@@ -316,9 +316,10 @@ const readBillingSettings=()=>{
 const saveBillingSettings=settings=>db.prepare("INSERT INTO settings(key,value) VALUES('billing_invoice_settings',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(settings));
 const buildServerBillingOverview=(today,settings)=>{
  const portfolio=getPortfolio();
- const invoices=db.prepare("SELECT * FROM billing_invoices WHERE billing_type='server_fee' AND deleted_at IS NULL").all().map(readBillingInvoice);
- const clients=db.prepare('SELECT * FROM portfolio_clients WHERE deleted_at IS NULL').all();
- return buildServerBillingSchedule({events:portfolio.events,activeAccounts:portfolio.active_accounts,invoices,clients,settings,today});
+ const invoices=db.prepare("SELECT id,client_id,client_name,account_number,billing_type,deleted_at,server_billing_due_date,invoice_number,payment_status,custom_line_items,server_maintenance_usd,server_maintenance_amount FROM billing_invoices WHERE billing_type='server_fee' AND deleted_at IS NULL").all().map(readBillingInvoice);
+ const clients=db.prepare('SELECT client_id,first_name,second_name,email,whatsapp_number,deleted_at FROM portfolio_clients WHERE deleted_at IS NULL').all();
+ const cycles=buildServerBillingSchedule({events:portfolio.events,activeAccounts:portfolio.active_accounts,invoices,clients,settings,today});
+ return {portfolio,cycles};
 };
 app.get('/api/admin/billing/settings',auth,(req,res)=>{
  try{return res.json({settings:readBillingSettings()})}
@@ -331,7 +332,7 @@ app.put('/api/admin/billing/settings',auth,(req,res)=>{
  catch(error){console.error('Unable to save invoice settings',error);return res.status(500).json({message:'Unable to save invoice settings.'})}
 });
 app.get('/api/admin/billing/overview',auth,(req,res)=>{
- try{const settings=readBillingSettings();return res.json({settings,cycles:buildServerBillingOverview(new Date().toISOString().slice(0,10),settings)})}
+ try{const settings=readBillingSettings();return res.json({settings,...buildServerBillingOverview(new Date().toISOString().slice(0,10),settings)})}
  catch(error){console.error('Unable to load server billing overview',error);return res.status(500).json({message:'Unable to load the server billing overview.'})}
 });
 app.get('/api/admin/billing/invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT * FROM billing_invoices WHERE deleted_at IS NULL ORDER BY created_at DESC,id DESC LIMIT 100').all().map(readBillingInvoice)}));
@@ -350,7 +351,7 @@ app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  let monthInvoices=[];
  if(scheduledDueDate&&input.period_type!=='onboard'){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDueDate)||Number.isNaN(new Date(`${scheduledDueDate}T00:00:00.000Z`).getTime())||new Date(`${scheduledDueDate}T00:00:00.000Z`).toISOString().slice(0,10)!==scheduledDueDate)return res.status(400).json({message:'Choose a valid server billing due date.'});
-  const cycle=buildServerBillingOverview(new Date().toISOString().slice(0,10),readBillingSettings()).find(item=>item.client_id===clientId&&item.due_date===scheduledDueDate&&item.account_numbers.includes(accountNumber));
+  const cycle=buildServerBillingOverview(new Date().toISOString().slice(0,10),readBillingSettings()).cycles.find(item=>item.client_id===clientId&&item.due_date===scheduledDueDate&&item.account_numbers.includes(accountNumber));
   if(!cycle)return res.status(400).json({message:'This account does not have an enabled server billing cycle for that due date.'});
   if(cycle.invoice_id)return res.status(409).json({message:'An invoice already exists for this account and server billing cycle.'});
  }
