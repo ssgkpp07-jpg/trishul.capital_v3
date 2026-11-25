@@ -43,6 +43,9 @@
     .billing-table-note{margin:8px 0 14px;color:#91a0b7;font-size:12px}
     .billing-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(2,minmax(140px,1fr));gap:10px;margin:12px 0}
     .billing-filters input,.billing-filters select{width:100%;margin:0}
+    .billing-sort{padding:0;margin:0;background:transparent;border:0;color:inherit;font:inherit;font-weight:inherit;text-align:left;white-space:nowrap;cursor:pointer}
+    .billing-sort:hover,.billing-sort:focus-visible{color:#f0c95e}
+    .billing-sort:focus-visible{outline:2px solid #d8b143;outline-offset:3px;border-radius:2px}
     @media(max-width:850px){.billing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-filters{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
     .admin-nav button:nth-child(4)::before{content:"$"}
@@ -107,7 +110,7 @@
         <select id="billingInvoiceYear" aria-label="Filter invoices by year"><option value="">All years</option></select>
       </div>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
-        <thead><tr><th>Invoice</th><th>Client</th><th>Account number</th><th>Period</th><th>Total (INR)</th><th>Payment</th><th>Actions</th></tr></thead>
+        <thead><tr><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="invoice_number">Invoice</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="client_name">Client</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="account_number">Account number</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="period_start">Period</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="amount">Total (INR)</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="payment_status">Payment</button></th><th>Actions</th></tr></thead>
         <tbody id="billingInvoiceRows"><tr><td colspan="7">Loading invoices…</td></tr></tbody>
       </table></div>
     </section>
@@ -120,7 +123,7 @@
         <select id="billingAuditYear" aria-label="Filter audit by year"><option value="">All years</option></select>
       </div>
       <div class="portfolio-table-wrap"><table class="portfolio-table">
-        <thead><tr><th>Invoice</th><th>Client</th><th>Account</th><th>Due date</th><th>Total (INR)</th><th>Payment status</th><th>Verified at</th><th>Action</th></tr></thead>
+        <thead><tr><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="invoice_number">Invoice</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="client_name">Client</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="account_number">Account</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="due_date">Due date</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="amount">Total (INR)</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="payment_status">Payment status</button></th><th aria-sort="none"><button type="button" class="billing-sort" data-billing-sort="paid_at">Verified at</button></th><th>Action</th></tr></thead>
         <tbody id="billingAuditRows"><tr><td colspan="8">Loading audit…</td></tr></tbody>
       </table></div>
     </section>
@@ -238,6 +241,14 @@
   let billingSettings = {};
   let scheduledServerBillingDueDate = '';
   let billingPdfPreviewUrl = '';
+  const billingSort = {
+    invoices: { key: '', direction: 'asc' },
+    audit: { key: '', direction: 'asc' }
+  };
+  const billingSortTypes = {
+    invoices: { amount: 'number' },
+    audit: { amount: 'number', due_date: 'date', paid_at: 'date' }
+  };
 
   function setBillingMessage(text, isError = false) {
     message.textContent = text;
@@ -400,9 +411,35 @@
     });
   }
 
+  function sortBillingRecords(records, table) {
+    const { key, direction } = billingSort[table];
+    if (!key) return records;
+    const multiplier = direction === 'asc' ? 1 : -1;
+    const type = billingSortTypes[table][key] || 'text';
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    return [...records].sort((left, right) => {
+      const leftValue = left[key] ?? '';
+      const rightValue = right[key] ?? '';
+      if (type === 'number') return (Number(leftValue) - Number(rightValue)) * multiplier;
+      if (type === 'date') return ((Date.parse(leftValue) || 0) - (Date.parse(rightValue) || 0)) * multiplier;
+      return collator.compare(String(leftValue), String(rightValue)) * multiplier;
+    });
+  }
+
+  function updateBillingSortHeaders(table) {
+    const section = document.querySelector(`[data-billing-view="${table}"]`);
+    const { key, direction } = billingSort[table];
+    section.querySelectorAll('.billing-sort').forEach(button => {
+      const active = button.dataset.billingSort === key;
+      const heading = button.closest('th');
+      heading.setAttribute('aria-sort', active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none');
+      button.textContent = `${button.textContent.replace(/ [↑↓]$/, '')}${active ? (direction === 'asc' ? ' ↑' : ' ↓') : ''}`;
+    });
+  }
+
   function renderInvoiceRows() {
     const rows = document.getElementById('billingInvoiceRows');
-    rows.innerHTML = filterBillingRecords(invoices, 'billingInvoice', 'period_start').map(invoice => {
+    rows.innerHTML = sortBillingRecords(filterBillingRecords(invoices, 'billingInvoice', 'period_start'), 'invoices').map(invoice => {
       const emailDisabled = !invoice.client_email;
       const phoneDisabled = !invoice.client_phone;
       return `<tr>
@@ -420,11 +457,15 @@
         </div></td>
       </tr>`;
     }).join('') || `<tr><td colspan="7">${invoices.length ? 'No invoices match these filters.' : 'No invoices yet. Create one above using a registered client.'}</td></tr>`;
+    updateBillingSortHeaders('invoices');
   }
 
   function renderAuditRows() {
     const rows = document.getElementById('billingAuditRows');
-    rows.innerHTML = filterBillingRecords(auditInvoices, 'billingAudit', 'due_date').map(invoice => `<tr>
+    rows.innerHTML = sortBillingRecords(filterBillingRecords(auditInvoices, 'billingAudit', 'due_date'), 'audit').map(invoice => {
+      const emailDisabled = !invoice.client_email;
+      const phoneDisabled = !invoice.client_phone;
+      return `<tr>
       <td>${escapeHtml(invoice.invoice_number)}</td>
       <td>${escapeHtml(invoice.client_id)} · ${escapeHtml(invoice.client_name)}</td>
       <td>${escapeHtml(invoice.account_number || '—')}</td>
@@ -435,8 +476,13 @@
       <td><div class="billing-actions">
         ${invoice.payment_status === 'paid' ? 'Verified' : `<button type="button" class="portfolio-action" onclick="markBillingInvoicePaid(${Number(invoice.id)})">Verify / mark paid</button>`}
         <button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(invoice.id)})">Preview</button>
+        <button type="button" class="portfolio-action" onclick="downloadBillingPdf(${Number(invoice.id)},'${escapeHtml(invoice.invoice_number)}')">Download PDF</button>
+        <button type="button" class="portfolio-action" ${emailDisabled ? 'disabled title="No client email saved"' : `onclick="prepareBillingEmail(${Number(invoice.id)})"`}>Email draft</button>
+        <button type="button" class="portfolio-action" ${phoneDisabled ? 'disabled title="No client WhatsApp saved"' : `onclick="prepareBillingWhatsApp(${Number(invoice.id)})"`}>WhatsApp draft</button>
       </div></td>
-    </tr>`).join('') || `<tr><td colspan="8">${auditInvoices.length ? 'No invoices match these filters.' : 'No invoices to audit.'}</td></tr>`;
+    </tr>`;
+    }).join('') || `<tr><td colspan="8">${auditInvoices.length ? 'No invoices match these filters.' : 'No invoices to audit.'}</td></tr>`;
+    updateBillingSortHeaders('audit');
   }
 
   function renderDeletedInvoices(deleted) {
@@ -616,7 +662,7 @@
   }
 
   async function markInvoicePaid(id) {
-    const invoice = invoices.find(item => Number(item.id) === Number(id));
+    const invoice = [...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id));
     if (!invoice || invoice.payment_status === 'paid') return;
     if (!confirm(`Confirm you verified payment for ${invoice.invoice_number} (${moneyInr(invoice.amount)})?`)) return;
     const reference = prompt('Optional payment reference, transaction ID, or verification note:') || '';
@@ -725,6 +771,19 @@
   document.getElementById('billingAuditSearch').addEventListener('input', renderAuditRows);
   document.getElementById('billingAuditMonth').addEventListener('change', renderAuditRows);
   document.getElementById('billingAuditYear').addEventListener('change', renderAuditRows);
+  document.querySelectorAll('[data-billing-view="invoices"] .billing-sort, [data-billing-view="audit"] .billing-sort').forEach(button => {
+    button.addEventListener('click', () => {
+      const table = button.closest('[data-billing-view]').dataset.billingView;
+      const sort = billingSort[table];
+      if (sort.key === button.dataset.billingSort) sort.direction = sort.direction === 'asc' ? 'desc' : 'asc';
+      else {
+        sort.key = button.dataset.billingSort;
+        sort.direction = 'asc';
+      }
+      if (table === 'invoices') renderInvoiceRows();
+      else renderAuditRows();
+    });
+  });
   document.getElementById('billingAddLine').addEventListener('click', addBillingLine);
   document.getElementById('billingClearScheduledCycle').addEventListener('click', clearScheduledCycle);
   document.querySelectorAll('[data-billing-view-button]').forEach(button =>
@@ -811,8 +870,8 @@
   window.loadBilling = loadBilling;
   window.previewBillingPdf = previewBillingPdf;
   window.downloadBillingPdf = downloadBillingPdf;
-  window.prepareBillingEmail = async id => prepareEmail(invoices.find(item => Number(item.id) === Number(id)));
-  window.prepareBillingWhatsApp = async id => prepareWhatsApp(invoices.find(item => Number(item.id) === Number(id)));
+  window.prepareBillingEmail = async id => prepareEmail([...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id)));
+  window.prepareBillingWhatsApp = async id => prepareWhatsApp([...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id)));
   window.markBillingInvoicePaid = markInvoicePaid;
   window.deleteBillingInvoice = removeInvoice;
   window.permanentlyDeleteBillingInvoice = permanentlyRemoveInvoice;
