@@ -256,12 +256,6 @@ export default async function handler(req, res) {
             .gte('period_start', monthStart).lte('period_start', monthEnd);
           if (periodError) throw periodError;
           monthInvoices = data || [];
-          if (monthInvoices.some(invoice => invoice.period_type !== input.period_type)) {
-            return res.status(409).json({ message: 'This client already has an invoice using the other billing period for this month. Use only weekly or monthly billing in a month.' });
-          }
-          if (monthInvoices.some(invoice => invoice.period_type === input.period_type && invoice.period_start === period.periodStart)) {
-            return res.status(409).json({ message: 'An invoice already exists for this client and billing period. Use the existing invoice or choose another period.' });
-          }
         }
 
         const settings = await getBillingSettings();
@@ -281,7 +275,13 @@ export default async function handler(req, res) {
         }
         invoice.invoice_number = await nextBillingInvoiceNumber(issueDate);
         const { data, error } = await supabase.from('billing_invoices').insert(invoice).select('*').single();
-        if (error?.code === '23505') return res.status(409).json({ message: 'An invoice already exists for this client and billing period.' });
+        if (error?.code === '23505') {
+          return res.status(409).json({
+            message: scheduledDueDate
+              ? 'An invoice already exists for this account and server billing cycle.'
+              : 'An invoice with this number already exists.'
+          });
+        }
         if (error) throw error;
         return res.status(201).json({ invoice: data });
       }
