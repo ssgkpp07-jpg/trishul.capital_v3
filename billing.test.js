@@ -91,6 +91,25 @@ test('weekly billing dates stop at the end of the selected month', () => {
   assert.throws(() => getBillingPeriodDates({ period_type: 'weekly', year: 2023, month: 2, week: 5 }), /valid week/);
 });
 
+test('instant invoices can share the same billing month', () => {
+  const input = {
+    account_number: 'ACC-1',
+    period_type: 'instant', year: 2026, month: 11,
+    withdrawal_profit_usd: 100, profit_split_percent: 10,
+    server_maintenance_usd: 0, usd_inr_rate: 90
+  };
+  assert.deepEqual(getBillingPeriodDates(input), {
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-30'
+  });
+  const client = { client_id: 'C-1', first_name: 'Sample', second_name: 'Client' };
+  const first = createBillingInvoice(client, input, false, undefined, 'INV-TC-001/11/2026', '2026-11-25');
+  const second = createBillingInvoice(client, input, false, undefined, 'INV-TC-002/11/2026', '2026-11-25');
+  assert.equal(first.period_type, 'instant');
+  assert.equal(second.period_type, 'instant');
+  assert.equal(first.period_start, second.period_start);
+});
+
 test('profit share, maintenance, and custom lines convert to INR with rounded totals', () => {
   const amounts = calculateBillingAmounts({
     withdrawal_profit_usd: 100,
