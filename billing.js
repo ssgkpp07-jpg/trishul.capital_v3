@@ -87,11 +87,11 @@ export function getBillingPeriodDates(input) {
   if (!Number.isInteger(month) || month < 1 || month > 12) throw new Error('Choose a valid month.');
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const startDay = input.period_type === 'weekly' ? (week - 1) * 7 + 1 : 1;
-  if (!['weekly', 'monthly', 'onboard'].includes(input.period_type)) throw new Error('Choose weekly, monthly, or onboarding billing.');
+  if (!['weekly', 'monthly', 'onboard', 'instant'].includes(input.period_type)) throw new Error('Choose weekly, monthly, onboarding, or instant billing.');
   if (input.period_type === 'weekly' && (!Number.isInteger(week) || startDay < 1 || startDay > daysInMonth)) {
     throw new Error('Choose a valid week for the selected month.');
   }
-  const endDay = ['monthly', 'onboard'].includes(input.period_type) ? daysInMonth : Math.min(startDay + 6, daysInMonth);
+  const endDay = ['monthly', 'onboard', 'instant'].includes(input.period_type) ? daysInMonth : Math.min(startDay + 6, daysInMonth);
   const date = day => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return { periodStart: date(startDay), periodEnd: date(endDay) };
 }
