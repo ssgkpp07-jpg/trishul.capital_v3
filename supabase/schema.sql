@@ -117,7 +117,7 @@ create table if not exists billing_invoices (
   client_address text not null default '',
   issue_date date not null,
   due_date date not null,
-  period_type text not null check (period_type in ('weekly', 'monthly')),
+  period_type text not null check (period_type in ('weekly', 'monthly', 'instant')),
   period_start date not null,
   period_end date not null,
   withdrawal_profit_usd numeric(14,2) not null default 0,
@@ -154,10 +154,14 @@ alter table billing_invoices add column if not exists payment_reference text;
 alter table billing_invoices add column if not exists delivery_status text not null default 'not_sent';
 alter table billing_invoices add column if not exists deleted_at timestamptz;
 alter table billing_invoices drop constraint if exists billing_invoices_client_id_period_start_period_type_key;
+alter table billing_invoices drop constraint if exists billing_invoices_period_type_check;
+alter table billing_invoices add constraint billing_invoices_period_type_check
+  check (period_type in ('weekly', 'monthly', 'instant'));
 
 create index if not exists billing_invoices_created_idx on billing_invoices(created_at desc);
 create index if not exists billing_invoices_client_period_idx on billing_invoices(client_id, period_start desc);
-create unique index if not exists billing_invoices_standard_period_idx
+drop index if exists billing_invoices_standard_period_idx;
+create index if not exists billing_invoices_standard_period_idx
   on billing_invoices(client_id, period_start, period_type)
   where billing_type = 'standard' and deleted_at is null;
 drop index if exists billing_invoices_server_cycle_idx;
