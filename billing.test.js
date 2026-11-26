@@ -8,11 +8,13 @@ import {
   createBillingInvoice,
   createBillingPdf,
   formatBillingInvoiceNumber,
+  formatPaidInvoiceDetails,
   getNextBillingInvoiceSequence,
   getBillingPeriodDates,
   getMonthlyAnniversaryDate,
   getServerBillingDueDate,
   getServerBillingCycles,
+  normalizeInvoicePaymentDetails,
   replaceInvoiceAccountNumber
 } from './billing.js';
 
@@ -152,6 +154,68 @@ test('invoice creation accepts manual WhatsApp-only sharing but requires an acco
   assert.throws(() => createBillingInvoice(client, { ...input, account_number: '' }), /portfolio account/);
   assert.throws(() => createBillingInvoice(client, input, false, undefined, 'INV-TC-001/10/2026', '2026-11-30'), /matching the issue date/);
   assert.throws(() => calculateBillingAmounts({ ...input, withdrawal_profit_usd: 0 }), /greater than zero/);
+});
+
+test('payment details validate UPI and bank transfer modes and preserve custom choices', () => {
+  assert.deepEqual(normalizeInvoicePaymentDetails({
+    payment_method: 'upi',
+    payment_upi_id: 'client@upi',
+    payment_gateway: 'PhonePe',
+    payment_reference: 'UPI-123'
+  }), {
+    payment_method: 'upi',
+    payment_gateway: 'PhonePe',
+    payment_upi_id: 'client@upi',
+    payment_reference: 'UPI-123'
+  });
+  assert.deepEqual(normalizeInvoicePaymentDetails({
+    payment_method: 'upi',
+    payment_upi_id: 'client@upi',
+    payment_gateway: 'Other',
+    payment_gateway_other: 'BHIM'
+  }), {
+    payment_method: 'upi',
+    payment_gateway: 'BHIM',
+    payment_upi_id: 'client@upi',
+    payment_reference: null
+  });
+  assert.deepEqual(normalizeInvoicePaymentDetails({
+    payment_method: 'bank_settled',
+    bank_transfer_type: 'NEFT',
+    payment_reference: 'UTR-456'
+  }), {
+    payment_method: 'bank_settled',
+    payment_gateway: 'NEFT',
+    payment_upi_id: null,
+    payment_reference: 'UTR-456'
+  });
+  assert.deepEqual(normalizeInvoicePaymentDetails({
+    payment_method: 'bank_settled',
+    bank_transfer_type: 'Other',
+    bank_transfer_other: 'IMPS Transfer'
+  }).payment_gateway, 'IMPS Transfer');
+  assert.throws(() => normalizeInvoicePaymentDetails({ payment_method: 'upi', payment_gateway: 'Other' }), /UPI ID/i);
+  assert.throws(() => normalizeInvoicePaymentDetails({
+    payment_method: 'bank_settled',
+    bank_transfer_type: 'NEFT',
+    payment_reference: 'x'.repeat(201)
+  }), /200 characters/i);
+});
+
+test('paid invoice details include the selected method, gateway, and reference', () => {
+  assert.equal(formatPaidInvoiceDetails({
+    payment_method: 'upi',
+    payment_gateway: 'Google Pay',
+    payment_upi_id: 'merchant@upi',
+    paid_at: '2026-11-26T12:00:00.000Z',
+    payment_reference: 'UPI-123'
+  }), 'Paid via UPI · Google Pay · UPI ID: merchant@upi · Verified on: 2026-11-26 · Reference: UPI-123');
+  assert.equal(formatPaidInvoiceDetails({
+    payment_method: 'bank_settled',
+    payment_gateway: 'NEFT',
+    payment_reference: 'UTR-456'
+  }), 'Bank settled · NEFT · Reference: UTR-456');
+  assert.equal(formatPaidInvoiceDetails({ payment_method: 'manual_verification' }), 'Payment verified manually');
 });
 
 test('monthly server cycles are due on onboarding anniversaries', () => {
