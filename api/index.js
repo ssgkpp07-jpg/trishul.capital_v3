@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
-import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings } from '../billing.js';
+import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings, normalizeInvoicePaymentDetails } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
@@ -184,14 +184,16 @@ export default async function handler(req, res) {
       }
 
       if (method === 'GET' && path === '/api/admin/billing/invoices') {
-        const { data, error } = await supabase.from('billing_invoices').select('*')
+        const { data, error } = await supabase.from('billing_invoices')
+          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
           .is('deleted_at', null).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
       }
 
       if (method === 'GET' && path === '/api/admin/billing/audit') {
-        const { data, error } = await supabase.from('billing_invoices').select('*')
+        const { data, error } = await supabase.from('billing_invoices')
+          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
           .is('deleted_at', null).order('payment_status').order('due_date').order('id').limit(500);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
@@ -307,17 +309,41 @@ export default async function handler(req, res) {
       const paidMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/paid$/.exec(path);
       if (method === 'POST' && paidMatch) {
         const id = Number(paidMatch[1]);
-        const { data: invoice, error } = await supabase.from('billing_invoices').select('*')
+        const { data: invoice, error } = await supabase.from('billing_invoices').select('id,invoice_number,payment_status')
           .eq('id', id).is('deleted_at', null).maybeSingle();
         if (error) throw error;
         if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
         if (invoice.payment_status === 'paid') return res.status(409).json({ message: 'This invoice is already marked as paid.' });
-        const reference = String(bodyOf(req).payment_reference || '').trim();
-        if (reference.length > 200) return res.status(400).json({ message: 'Payment reference must be 200 characters or fewer.' });
+        let paymentDetails;
+        try { paymentDetails = normalizeInvoicePaymentDetails(bodyOf(req)); } catch (validationError) {
+          return res.status(400).json({ message: validationError.message });
+        }
         const { data, error: updateError } = await supabase.from('billing_invoices')
-          .update({ payment_status: 'paid', paid_at: new Date().toISOString(), payment_method: 'manual_verification', payment_reference: reference || null })
-          .eq('id', id).is('deleted_at', null).select('*').single();
+          .update({ ...paymentDetails, payment_status: 'paid', paid_at: new Date().toISOString() })
+          .eq('id', id).eq('payment_status', 'pending').is('deleted_at', null)
+          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference').maybeSingle();
         if (updateError) throw updateError;
+        if (!data) return res.status(409).json({ message: 'This invoice was already updated. Refresh and try again.' });
+        return res.status(200).json({ invoice: data });
+      }
+
+      const paymentDetailsMatch = /^\/api\/admin\/billing\/invoices\/(\d+)\/payment-details$/.exec(path);
+      if (method === 'PUT' && paymentDetailsMatch) {
+        const id = Number(paymentDetailsMatch[1]);
+        const { data: invoice, error } = await supabase.from('billing_invoices')
+          .select('id,payment_status').eq('id', id).is('deleted_at', null).maybeSingle();
+        if (error) throw error;
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
+        if (invoice.payment_status !== 'paid') return res.status(409).json({ message: 'Only paid invoices can have their payment details edited.' });
+        let paymentDetails;
+        try { paymentDetails = normalizeInvoicePaymentDetails(bodyOf(req)); } catch (validationError) {
+          return res.status(400).json({ message: validationError.message });
+        }
+        const { data, error: updateError } = await supabase.from('billing_invoices')
+          .update(paymentDetails).eq('id', id).eq('payment_status', 'paid').is('deleted_at', null)
+          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference').maybeSingle();
+        if (updateError) throw updateError;
+        if (!data) return res.status(409).json({ message: 'This invoice changed while you were editing it. Refresh and try again.' });
         return res.status(200).json({ invoice: data });
       }
 
