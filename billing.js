@@ -17,6 +17,50 @@ const MAX_BILLING_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const validIsoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value)
   && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 
+export function normalizeInvoicePaymentDetails(input = {}) {
+  const paymentMethod = String(input.payment_method || '').trim().toLowerCase();
+  if (!['upi', 'bank_settled'].includes(paymentMethod)) throw new Error('Choose UPI or Bank settled as the payment method.');
+
+  const paymentReference = String(input.payment_reference || '').trim();
+  if (paymentReference.length > 200) throw new Error('Payment reference must be 200 characters or fewer.');
+
+  let paymentGateway;
+  let paymentUpiId = null;
+  if (paymentMethod === 'upi') {
+    paymentUpiId = String(input.payment_upi_id || '').trim();
+    if (!paymentUpiId || paymentUpiId.length > 200) throw new Error('Enter a UPI ID or payment handle of 200 characters or fewer.');
+    const selectedGateway = String(input.payment_gateway || '').trim();
+    if (!['Google Pay', 'PhonePe', 'Paytm', 'Other'].includes(selectedGateway)) throw new Error('Choose a valid UPI gateway.');
+    paymentGateway = selectedGateway === 'Other' ? String(input.payment_gateway_other || '').trim() : selectedGateway;
+    if (!paymentGateway || paymentGateway.length > 100) throw new Error('Enter a gateway name of 100 characters or fewer.');
+  } else {
+    const selectedTransferType = String(input.bank_transfer_type || '').trim();
+    if (!['IMPS', 'NEFT', 'RTGS', 'Other'].includes(selectedTransferType)) throw new Error('Choose a valid bank transfer type.');
+    paymentGateway = selectedTransferType === 'Other' ? String(input.bank_transfer_other || '').trim() : selectedTransferType;
+    if (!paymentGateway || paymentGateway.length > 100) throw new Error('Enter a bank transfer type of 100 characters or fewer.');
+  }
+
+  return {
+    payment_method: paymentMethod,
+    payment_gateway: paymentGateway,
+    payment_upi_id: paymentUpiId,
+    payment_reference: paymentReference || null
+  };
+}
+
+export function formatPaidInvoiceDetails(invoice) {
+  const method = invoice.payment_method === 'upi'
+    ? ['Paid via UPI', invoice.payment_gateway, invoice.payment_upi_id ? `UPI ID: ${invoice.payment_upi_id}` : ''].filter(Boolean).join(' · ')
+    : invoice.payment_method === 'bank_settled'
+      ? ['Bank settled', invoice.payment_gateway].filter(Boolean).join(' · ')
+      : 'Payment verified manually';
+  return [
+    method,
+    invoice.paid_at ? `Verified on: ${String(invoice.paid_at).slice(0, 10)}` : '',
+    invoice.payment_reference ? `Reference: ${invoice.payment_reference}` : ''
+  ].filter(Boolean).join(' · ');
+}
+
 export function getDefaultBillingSettings() {
   return {
     logo_data_url: '',
@@ -570,9 +614,8 @@ export function createBillingPdf(invoice) {
       document.link(buttonX, buttonY, 200, 42, paymentPageUrl);
     }
     if (invoice.payment_status === 'paid') {
-      const paidDetails = ['Payment verified manually', invoice.paid_at ? `Verified on: ${String(invoice.paid_at).slice(0, 10)}` : '', invoice.payment_reference ? `Reference: ${invoice.payment_reference}` : ''].filter(Boolean).join(' · ');
       document.fillColor('#24743a').font('Helvetica-Bold').fontSize(8)
-        .text(paidDetails, left, Math.max(rowY + 96, document.y + 10), { width: contentWidth });
+        .text(formatPaidInvoiceDetails(invoice), left, Math.max(rowY + 96, document.y + 10), { width: contentWidth });
     }
 
     const footer = 'Please use the invoice number as your payment reference. This invoice is not a GST tax invoice unless applicable tax details are separately stated.';
