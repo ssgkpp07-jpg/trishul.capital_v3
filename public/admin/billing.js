@@ -31,6 +31,19 @@
     .billing-error{color:#ffb4a9}
     .billing-pdf-dialog{width:min(1050px,calc(100vw - 28px));height:min(92vh,900px);max-width:none;max-height:92vh;padding:18px;background:#11161f;color:#e5eaf2;border:1px solid #424b59;border-radius:10px}
     .billing-pdf-dialog::backdrop{background:#000c}
+    .billing-payment-dialog{width:min(560px,calc(100vw - 28px));max-height:90vh;overflow:auto;padding:22px;background:#11161f;color:#e5eaf2;border:1px solid #424b59;border-radius:10px}
+    .billing-payment-dialog::backdrop{background:#000c}
+    .billing-payment-dialog h2{margin:0}
+    .billing-payment-dialog p{color:#91a0b7}
+    .billing-payment-dialog label{display:block;margin:12px 0 5px;color:#aab7ca;font-size:12px}
+    .billing-payment-dialog input,.billing-payment-dialog select{width:100%;margin:0;padding:10px;background:#0b0f15;color:#e5eaf2;border:1px solid #36404e;border-radius:5px}
+    .billing-payment-dialog .billing-payment-summary{display:flex;justify-content:space-between;gap:12px;margin:14px 0;padding:12px;border:1px solid #252e3a;border-radius:7px;background:#0b0f15}
+    .billing-payment-dialog .billing-payment-summary strong{color:#f0c95e}
+    .billing-payment-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+    .billing-payment-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+    .billing-payment-actions button{width:auto;margin:0}
+    .billing-payment-help{margin:6px 0 0;font-size:11px}
+    .billing-payment-dialog .billing-error{margin:10px 0}
     .billing-pdf-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
     .billing-pdf-dialog-header h2{margin:0}
     .billing-pdf-dialog iframe{display:block;width:100%;height:calc(100% - 55px);background:#fff;border:1px solid #303947;border-radius:6px}
@@ -47,7 +60,7 @@
     .billing-sort:hover,.billing-sort:focus-visible{color:#f0c95e}
     .billing-sort:focus-visible{outline:2px solid #d8b143;outline-offset:3px;border-radius:2px}
     @media(max-width:850px){.billing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-filters{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
+    @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-filters,.billing-payment-grid{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
     .admin-nav button:nth-child(4)::before{content:"$"}
     .admin-nav button:nth-child(5)::before{content:"◉"}
     .admin-nav button:nth-child(6)::before{content:"⚙"}
@@ -151,6 +164,30 @@
     <dialog id="billingPdfDialog" class="billing-pdf-dialog" aria-labelledby="billingPdfTitle">
       <div class="billing-pdf-dialog-header"><h2 id="billingPdfTitle">Invoice PDF preview</h2><button type="button" class="portfolio-action" id="billingPdfClose">Close</button></div>
       <iframe id="billingPdfFrame" title="Generated invoice PDF preview"></iframe>
+    </dialog>
+    <dialog id="billingPaymentDialog" class="billing-payment-dialog" aria-labelledby="billingPaymentTitle">
+      <div class="billing-pdf-dialog-header"><h2 id="billingPaymentTitle">Record payment</h2><button type="button" class="portfolio-action" id="billingPaymentClose" aria-label="Close payment dialog">Close</button></div>
+      <p>Confirm the payment details for this invoice.</p>
+      <div class="billing-payment-summary"><span id="billingPaymentInvoice"></span><strong id="billingPaymentAmount"></strong></div>
+      <form id="billingPaymentForm">
+        <label for="billingPaymentMethod">Payment method</label>
+        <select id="billingPaymentMethod" required><option value="upi">UPI</option><option value="bank_settled">Bank settled</option></select>
+        <div id="billingUpiFields" class="billing-payment-grid">
+          <div><label for="billingPaymentUpiId">UPI ID / payment handle</label><input id="billingPaymentUpiId" maxlength="200" required placeholder="e.g. name@bank"></div>
+          <div><label for="billingPaymentGateway">Gateway</label><select id="billingPaymentGateway" required><option value="Google Pay">Google Pay</option><option value="PhonePe">PhonePe</option><option value="Paytm">Paytm</option><option value="Other">Other</option></select></div>
+        </div>
+        <div id="billingGatewayOtherField" class="hidden"><label for="billingPaymentGatewayOther">Gateway name</label><input id="billingPaymentGatewayOther" maxlength="100" required placeholder="Enter gateway name"></div>
+        <div id="billingBankFields" class="hidden">
+          <label for="billingBankTransferType">Bank transfer type</label>
+          <select id="billingBankTransferType" required><option value="IMPS">IMPS</option><option value="NEFT">NEFT</option><option value="RTGS">RTGS</option><option value="Other">Other</option></select>
+        </div>
+        <div id="billingBankOtherField" class="hidden"><label for="billingBankTransferOther">Transfer type</label><input id="billingBankTransferOther" maxlength="100" required placeholder="Enter transfer type"></div>
+        <label for="billingPaymentReference">Reference number</label>
+        <input id="billingPaymentReference" maxlength="200" placeholder="UTR / transaction reference">
+        <p class="billing-payment-help">Saved on the paid invoice and shown in its PDF footer.</p>
+        <p id="billingPaymentDialogMsg" class="billing-error hidden" role="status"></p>
+        <div class="billing-payment-actions"><button type="button" class="portfolio-action" id="billingPaymentCancel">Cancel</button><button type="submit" class="portfolio-action" id="billingPaymentSubmit">Mark as paid</button></div>
+      </form>
     </dialog>`;
 
   const app = document.getElementById('app');
@@ -241,6 +278,8 @@
   let billingSettings = {};
   let scheduledServerBillingDueDate = '';
   let billingPdfPreviewUrl = '';
+  let pendingPaymentInvoiceId = null;
+  let editingInvoicePayment = false;
   const billingSort = {
     invoices: { key: '', direction: 'asc' },
     audit: { key: '', direction: 'asc' }
@@ -388,6 +427,22 @@
     return invoice.payment_status === 'paid' ? statusBadge('paid') : statusBadge('pending');
   }
 
+  function paymentDetailsLabel(invoice) {
+    const details = [];
+    if (invoice.payment_method === 'upi') {
+      details.push('UPI');
+      if (invoice.payment_gateway) details.push(invoice.payment_gateway);
+      if (invoice.payment_upi_id) details.push(`UPI ID: ${invoice.payment_upi_id}`);
+    } else if (invoice.payment_method === 'bank_settled') {
+      details.push('Bank settled');
+      if (invoice.payment_gateway) details.push(invoice.payment_gateway);
+    } else if (invoice.payment_status === 'paid') {
+      details.push('Payment verified manually');
+    }
+    if (invoice.payment_reference) details.push(`Reference: ${invoice.payment_reference}`);
+    return details.join(' · ');
+  }
+
   function filterBillingRecords(records, prefix, dateKey) {
     const search = document.getElementById(`${prefix}Search`).value.trim().toLocaleLowerCase();
     const monthSelect = document.getElementById(`${prefix}Month`);
@@ -449,6 +504,7 @@
         <td>${escapeHtml(invoice.period_type)}<br><span class="muted">${escapeHtml(invoice.period_start)} to ${escapeHtml(invoice.period_end)}</span></td>
         <td>${moneyInr(invoice.amount)}</td><td>${invoicePaymentLabel(invoice)}</td>
         <td><div class="billing-actions">
+            ${invoice.payment_status === 'paid' ? `<button type="button" class="portfolio-action" onclick="editBillingInvoicePayment(${Number(invoice.id)})">Edit payment</button>` : ''}
           <button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(invoice.id)})">Preview PDF</button>
           <button type="button" class="portfolio-action" onclick="downloadBillingPdf(${Number(invoice.id)},'${escapeHtml(invoice.invoice_number)}')">Download PDF</button>
           <button type="button" class="portfolio-action" ${emailDisabled ? 'disabled title="No client email saved"' : `onclick="prepareBillingEmail(${Number(invoice.id)})"`}>Email draft</button>
@@ -465,16 +521,17 @@
     rows.innerHTML = sortBillingRecords(filterBillingRecords(auditInvoices, 'billingAudit', 'due_date'), 'audit').map(invoice => {
       const emailDisabled = !invoice.client_email;
       const phoneDisabled = !invoice.client_phone;
+      const paymentDetails = paymentDetailsLabel(invoice);
       return `<tr>
       <td>${escapeHtml(invoice.invoice_number)}</td>
       <td>${escapeHtml(invoice.client_id)} · ${escapeHtml(invoice.client_name)}</td>
       <td>${escapeHtml(invoice.account_number || '—')}</td>
       <td>${escapeHtml(invoice.due_date)}</td>
       <td>${moneyInr(invoice.amount)}</td>
-      <td>${invoicePaymentLabel(invoice)}${invoice.payment_reference ? `<br><span class="muted">${escapeHtml(invoice.payment_reference)}</span>` : ''}</td>
+      <td>${invoicePaymentLabel(invoice)}${paymentDetails ? `<br><span class="muted">${escapeHtml(paymentDetails)}</span>` : ''}</td>
       <td>${invoice.paid_at ? escapeHtml(new Date(invoice.paid_at).toLocaleString()) : '—'}</td>
       <td><div class="billing-actions">
-        ${invoice.payment_status === 'paid' ? 'Verified' : `<button type="button" class="portfolio-action" onclick="markBillingInvoicePaid(${Number(invoice.id)})">Verify / mark paid</button>`}
+        ${invoice.payment_status === 'paid' ? `<button type="button" class="portfolio-action" onclick="editBillingInvoicePayment(${Number(invoice.id)})">Edit payment</button>` : `<button type="button" class="portfolio-action" onclick="markBillingInvoicePaid(${Number(invoice.id)})">Verify / mark paid</button>`}
         <button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(invoice.id)})">Preview</button>
         <button type="button" class="portfolio-action" onclick="downloadBillingPdf(${Number(invoice.id)},'${escapeHtml(invoice.invoice_number)}')">Download PDF</button>
         <button type="button" class="portfolio-action" ${emailDisabled ? 'disabled title="No client email saved"' : `onclick="prepareBillingAuditEmail(${Number(invoice.id)})"`}>Email draft</button>
@@ -679,17 +736,104 @@
     }
   }
 
-  async function markInvoicePaid(id) {
+  function updatePaymentDialogFields() {
+    const isUpi = document.getElementById('billingPaymentMethod').value === 'upi';
+    const gatewayIsOther = document.getElementById('billingPaymentGateway').value === 'Other';
+    const bankTypeIsOther = document.getElementById('billingBankTransferType').value === 'Other';
+    document.getElementById('billingUpiFields').classList.toggle('hidden', !isUpi);
+    document.getElementById('billingBankFields').classList.toggle('hidden', isUpi);
+    document.getElementById('billingGatewayOtherField').classList.toggle('hidden', !isUpi || !gatewayIsOther);
+    document.getElementById('billingBankOtherField').classList.toggle('hidden', isUpi || !bankTypeIsOther);
+    document.getElementById('billingPaymentUpiId').required = isUpi;
+    document.getElementById('billingPaymentGateway').required = isUpi;
+    document.getElementById('billingPaymentGatewayOther').required = isUpi && gatewayIsOther;
+    document.getElementById('billingBankTransferType').required = !isUpi;
+    document.getElementById('billingBankTransferOther').required = !isUpi && bankTypeIsOther;
+  }
+
+  function setPaymentDialogMessage(text = '') {
+    const notice = document.getElementById('billingPaymentDialogMsg');
+    notice.textContent = text;
+    notice.classList.toggle('hidden', !text);
+  }
+
+  function openPaymentDialog(id, edit = false) {
     const invoice = [...invoices, ...auditInvoices].find(item => Number(item.id) === Number(id));
-    if (!invoice || invoice.payment_status === 'paid') return;
-    if (!confirm(`Confirm you verified payment for ${invoice.invoice_number} (${moneyInr(invoice.amount)})?`)) return;
-    const reference = prompt('Optional payment reference, transaction ID, or verification note:') || '';
+    if (!invoice || (edit ? invoice.payment_status !== 'paid' : invoice.payment_status === 'paid')) return;
+    pendingPaymentInvoiceId = Number(id);
+    editingInvoicePayment = edit;
+
+    const methodSelect = document.getElementById('billingPaymentMethod');
+    const gatewaySelect = document.getElementById('billingPaymentGateway');
+    const transferTypeSelect = document.getElementById('billingBankTransferType');
+    const form = document.getElementById('billingPaymentForm');
+    form.reset();
+
+    const method = edit && invoice.payment_method === 'bank_settled' ? 'bank_settled' : 'upi';
+    methodSelect.value = method;
+    document.getElementById('billingPaymentUpiId').value = edit ? invoice.payment_upi_id || '' : '';
+    document.getElementById('billingPaymentReference').value = edit ? invoice.payment_reference || '' : '';
+
+    const upiGateways = ['Google Pay', 'PhonePe', 'Paytm'];
+    const upiGateway = edit && method === 'upi' ? invoice.payment_gateway || '' : 'Google Pay';
+    gatewaySelect.value = upiGateways.includes(upiGateway) ? upiGateway : upiGateway ? 'Other' : 'Google Pay';
+    document.getElementById('billingPaymentGatewayOther').value =
+      upiGateway && !upiGateways.includes(upiGateway) ? upiGateway : '';
+    const transferTypes = ['IMPS', 'NEFT', 'RTGS'];
+    const transferType = edit && method === 'bank_settled' ? invoice.payment_gateway || '' : 'IMPS';
+    transferTypeSelect.value = transferTypes.includes(transferType) ? transferType : transferType ? 'Other' : 'IMPS';
+    document.getElementById('billingBankTransferOther').value =
+      transferType && !transferTypes.includes(transferType) ? transferType : '';
+
+    document.getElementById('billingPaymentTitle').textContent = edit ? 'Edit payment details' : 'Record payment';
+    document.getElementById('billingPaymentSubmit').textContent = edit ? 'Save changes' : 'Mark as paid';
+    document.getElementById('billingPaymentInvoice').textContent = invoice.invoice_number;
+    document.getElementById('billingPaymentAmount').textContent = moneyInr(invoice.amount);
+    setPaymentDialogMessage('');
+    updatePaymentDialogFields();
+    document.getElementById('billingPaymentDialog').showModal();
+  }
+
+  async function saveInvoicePayment(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.reportValidity() || pendingPaymentInvoiceId == null) return;
+    const method = document.getElementById('billingPaymentMethod').value;
+    const payload = {
+      payment_method: method,
+      payment_reference: document.getElementById('billingPaymentReference').value.trim()
+    };
+    if (method === 'upi') {
+      payload.payment_upi_id = document.getElementById('billingPaymentUpiId').value.trim();
+      payload.payment_gateway = document.getElementById('billingPaymentGateway').value;
+      payload.payment_gateway_other = document.getElementById('billingPaymentGatewayOther').value.trim();
+    } else {
+      payload.bank_transfer_type = document.getElementById('billingBankTransferType').value;
+      payload.bank_transfer_other = document.getElementById('billingBankTransferOther').value.trim();
+    }
+
+    const submit = document.getElementById('billingPaymentSubmit');
+    submit.disabled = true;
+    setPaymentDialogMessage('');
     try {
-      const result = await apiRequest(`/api/admin/billing/invoices/${id}/paid`, { method: 'POST', body: JSON.stringify({ payment_reference: reference.trim() }) });
-      setBillingMessage(`Invoice ${result.invoice.invoice_number} marked as paid after manual verification.`);
+      const path = editingInvoicePayment
+        ? `/api/admin/billing/invoices/${pendingPaymentInvoiceId}/payment-details`
+        : `/api/admin/billing/invoices/${pendingPaymentInvoiceId}/paid`;
+      const result = await apiRequest(path, {
+        method: editingInvoicePayment ? 'PUT' : 'POST',
+        body: JSON.stringify(payload)
+      });
+      const invoiceNumber = result.invoice.invoice_number;
+      document.getElementById('billingPaymentDialog').close();
+      pendingPaymentInvoiceId = null;
+      setBillingMessage(editingInvoicePayment
+        ? `Payment details for invoice ${invoiceNumber} updated.`
+        : `Invoice ${invoiceNumber} marked as paid.`);
       await loadBilling();
     } catch (error) {
-      setBillingMessage(error.message, true);
+      setPaymentDialogMessage(error.message);
+    } finally {
+      submit.disabled = false;
     }
   }
 
@@ -782,6 +926,15 @@
     if (billingPdfPreviewUrl) URL.revokeObjectURL(billingPdfPreviewUrl);
     billingPdfPreviewUrl = '';
   });
+  document.getElementById('billingPaymentClose').addEventListener('click', () => document.getElementById('billingPaymentDialog').close());
+  document.getElementById('billingPaymentCancel').addEventListener('click', () => document.getElementById('billingPaymentDialog').close());
+  document.getElementById('billingPaymentDialog').addEventListener('close', () => {
+    pendingPaymentInvoiceId = null;
+  });
+  document.getElementById('billingPaymentForm').addEventListener('submit', saveInvoicePayment);
+  document.getElementById('billingPaymentMethod').addEventListener('change', updatePaymentDialogFields);
+  document.getElementById('billingPaymentGateway').addEventListener('change', updatePaymentDialogFields);
+  document.getElementById('billingBankTransferType').addEventListener('change', updatePaymentDialogFields);
   document.getElementById('billingRefresh').addEventListener('click', loadBilling);
   document.getElementById('billingInvoiceSearch').addEventListener('input', renderInvoiceRows);
   document.getElementById('billingInvoiceMonth').addEventListener('change', renderInvoiceRows);
@@ -898,7 +1051,8 @@
     const invoice = auditInvoices.find(item => Number(item.id) === Number(id)) || invoices.find(item => Number(item.id) === Number(id));
     return invoice?.payment_status === 'paid' ? preparePaidWhatsApp(invoice) : prepareWhatsApp(invoice);
   };
-  window.markBillingInvoicePaid = markInvoicePaid;
+  window.markBillingInvoicePaid = id => openPaymentDialog(id);
+  window.editBillingInvoicePayment = id => openPaymentDialog(id, true);
   window.deleteBillingInvoice = removeInvoice;
   window.permanentlyDeleteBillingInvoice = permanentlyRemoveInvoice;
   window.prepareServerBillingInvoice = prepareServerInvoice;
