@@ -139,6 +139,8 @@ create table if not exists billing_invoices (
   payment_status text not null default 'pending' check (payment_status in ('pending', 'paid')),
   paid_at timestamptz,
   payment_method text,
+  payment_gateway text,
+  payment_upi_id text,
   payment_reference text,
   delivery_status text not null default 'not_sent',
   deleted_at timestamptz
@@ -151,6 +153,8 @@ alter table billing_invoices add column if not exists invoice_settings jsonb not
 alter table billing_invoices add column if not exists payment_status text not null default 'pending';
 alter table billing_invoices add column if not exists paid_at timestamptz;
 alter table billing_invoices add column if not exists payment_method text;
+alter table billing_invoices add column if not exists payment_gateway text;
+alter table billing_invoices add column if not exists payment_upi_id text;
 alter table billing_invoices add column if not exists payment_reference text;
 alter table billing_invoices add column if not exists delivery_status text not null default 'not_sent';
 alter table billing_invoices add column if not exists deleted_at timestamptz;
