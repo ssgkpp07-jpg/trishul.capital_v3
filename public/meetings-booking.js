@@ -1,6 +1,20 @@
 (() => {
   const $ = id => document.getElementById(id);
   const apiBase = (window.TRISHUL_API_URL || '').replace(/\/$/, '');
+  const menuButton = document.querySelector('.hamburger');
+  const closeMenu = () => {
+    document.body.classList.remove('menu-open');
+    menuButton?.setAttribute('aria-expanded', 'false');
+  };
+  menuButton?.addEventListener('click', () => {
+    const isOpen = document.body.classList.toggle('menu-open');
+    menuButton.setAttribute('aria-expanded', String(isOpen));
+  });
+  document.querySelector('.menu-close')?.addEventListener('click', closeMenu);
+  document.querySelector('.side-menu-backdrop')?.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeMenu();
+  });
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
   const timezoneSelect = $('bookingTimezone');
   const timezoneNames = typeof Intl.supportedValuesOf === 'function'
@@ -26,7 +40,7 @@
   let loadingSlots = false;
   let slotRequestId = 0;
 
-  async function loadSlots() {
+  async function loadSlots({ findNextAvailableDate = false } = {}) {
     const requestId = ++slotRequestId;
     const date = $('bookingDate').value;
     selectedSlot = null;
@@ -40,12 +54,20 @@
     loadingSlots = true;
     $('slotStatus').textContent = 'Loading available times…';
     try {
-      const query = new URLSearchParams({ start_date: date, end_date: date, time_zone: timezoneSelect.value });
+      const query = new URLSearchParams({
+        start_date: date,
+        end_date: findNextAvailableDate ? $('bookingDate').max : date,
+        time_zone: timezoneSelect.value
+      });
       const response = await fetch(`${apiBase}/api/public/meetings/availability?${query}`);
       const result = await response.json().catch(() => ({}));
       if (requestId !== slotRequestId) return;
       if (!response.ok) throw new Error(result.message || 'Could not load available times.');
-      const day = result.slots.find(item => item.date === date);
+      let day = result.slots.find(item => item.date === date);
+      if ((!day?.slots?.length) && findNextAvailableDate) {
+        day = result.slots.find(item => item.date >= date && item.slots?.length);
+        if (day) $('bookingDate').value = day.date;
+      }
       if (!day?.slots?.length) {
         $('slotStatus').textContent = 'No times are available on this date. Please choose another date.';
         return;
@@ -92,7 +114,7 @@
   $('bookingDate').addEventListener('change', loadSlots);
   timezoneSelect.addEventListener('change', () => {
     setDateBounds($('bookingDate').value);
-    loadSlots();
+    loadSlots({ findNextAvailableDate: true });
   });
   loadSlots();
 
