@@ -103,7 +103,7 @@ function HomeBookingCalendar(){
   const firstDay=new Date(year,month,1).getDay();
   const daysInMonth=new Date(year,month+1,0).getDate();
   const cells=[
-    ...Array.from({length:firstDay},()=>'<span class="booking-mini-day empty" aria-hidden="true"></span>'),
+    ...Array.from({length:firstDay},()=>'<span class="booking-mini-day placeholder" aria-hidden="true"></span>'),
     ...Array.from({length:daysInMonth},(_,index)=>{
       const day=index+1;
       return day===today.getDate()
@@ -111,7 +111,7 @@ function HomeBookingCalendar(){
         :`<span class="booking-mini-day">${day}</span>`;
     })
   ];
-  while(cells.length%7)cells.push('<span class="booking-mini-day empty" aria-hidden="true"></span>');
+  while(cells.length%7)cells.push('<span class="booking-mini-day placeholder" aria-hidden="true"></span>');
   return `<section class="section booking-calendar-section">
     <div class="booking-calendar-layout">
       <div class="booking-calendar-copy"><span class="eyebrow">MEET WITH TRISHUL CAPITAL</span><h2>Choose a day to <span>connect.</span></h2>
