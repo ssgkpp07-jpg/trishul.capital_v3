@@ -161,6 +161,43 @@ export default async function handler(req, res) {
         return res.status(200).json({ settings });
       }
 
+      if (method === 'POST' && path === '/api/admin/billing/preview') {
+        let settings;
+        try { settings = normalizeBillingSettings(bodyOf(req).settings); } catch (error) {
+          return res.status(400).json({ message: error.message });
+        }
+        const issueDate = new Date().toISOString().slice(0, 10);
+        const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const pdf = await createBillingPdf({
+          invoice_number: 'INV-TC-PREVIEW',
+          client_id: 'PREVIEW',
+          client_name: 'Sample Client',
+          client_email: 'client@example.com',
+          client_phone: '',
+          client_address: 'Salem, Tamil Nadu, India',
+          account_number: 'TC-0001',
+          issue_date: issueDate,
+          due_date: dueDate,
+          period_type: 'monthly',
+          period_start: issueDate,
+          period_end: dueDate,
+          withdrawal_profit_usd: 0,
+          profit_split_percent: 0,
+          profit_share_usd: 0,
+          profit_share_amount: 0,
+          server_maintenance_usd: 0,
+          server_maintenance_amount: 0,
+          custom_line_items: [{ description: 'Invoice layout preview', amount_usd: 10, amount_inr: 900 }],
+          usd_inr_rate: 90,
+          amount: 900,
+          payment_status: 'pending',
+          invoice_settings: settings
+        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline; filename="invoice-preview.pdf"');
+        return res.status(200).send(pdf);
+      }
+
       if (method === 'GET' && path === '/api/admin/billing/overview') {
         const settings = await getBillingSettings();
         const [portfolio, invoiceResult, clientResult] = await Promise.all([
@@ -185,7 +222,7 @@ export default async function handler(req, res) {
 
       if (method === 'GET' && path === '/api/admin/billing/invoices') {
         const { data, error } = await supabase.from('billing_invoices')
-          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
+          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
           .is('deleted_at', null).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
@@ -193,7 +230,7 @@ export default async function handler(req, res) {
 
       if (method === 'GET' && path === '/api/admin/billing/audit') {
         const { data, error } = await supabase.from('billing_invoices')
-          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
+          .select('id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,created_at')
           .is('deleted_at', null).order('payment_status').order('due_date').order('id').limit(500);
         if (error) throw error;
         return res.status(200).json({ invoices: data || [] });
@@ -321,7 +358,7 @@ export default async function handler(req, res) {
         const { data, error: updateError } = await supabase.from('billing_invoices')
           .update({ ...paymentDetails, payment_status: 'paid', paid_at: new Date().toISOString() })
           .eq('id', id).eq('payment_status', 'pending').is('deleted_at', null)
-          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference').maybeSingle();
+          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference').maybeSingle();
         if (updateError) throw updateError;
         if (!data) return res.status(409).json({ message: 'This invoice was already updated. Refresh and try again.' });
         return res.status(200).json({ invoice: data });
@@ -341,7 +378,7 @@ export default async function handler(req, res) {
         }
         const { data, error: updateError } = await supabase.from('billing_invoices')
           .update(paymentDetails).eq('id', id).eq('payment_status', 'paid').is('deleted_at', null)
-          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference').maybeSingle();
+          .select('id,invoice_number,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference').maybeSingle();
         if (updateError) throw updateError;
         if (!data) return res.status(409).json({ message: 'This invoice changed while you were editing it. Refresh and try again.' });
         return res.status(200).json({ invoice: data });
