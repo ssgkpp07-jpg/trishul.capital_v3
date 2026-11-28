@@ -29,7 +29,7 @@
 .booking-calendar-weekdays,.booking-calendar-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;text-align:center}
 .booking-calendar-weekdays{margin-bottom:8px;color:#8f897c;font-size:11px}
 .booking-mini-day{display:grid;place-items:center;aspect-ratio:1;border-radius:7px;color:#dedbd2;font-size:13px}
-.booking-mini-day.empty{color:transparent}
+.booking-mini-day.placeholder{color:transparent}
 .booking-mini-day.current{border:1px solid var(--gold2);background:#34280c;color:#fff4c2;box-shadow:0 0 8px #f4d47b99,0 0 22px #d6ad4355;font-weight:700;animation:booking-current-glow 2s ease-in-out infinite}
 .booking-calendar-today{margin:14px 0 12px;color:#b9b3a5;font-size:12px}
 .booking-slot-cta{width:100%;margin-top:0}
