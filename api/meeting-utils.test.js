@@ -52,6 +52,7 @@ test('generates slots only inside the weekly window and avoids busy events plus 
     hourCycle: 'h23'
   }).format(new Date(slot.start_at)));
   assert.equal(times.length, 13);
+  assert.ok(times.includes('09:00'));
   assert.ok(!times.includes('09:30'));
   assert.ok(!times.includes('10:00'));
   assert.ok(!times.includes('10:30'));
