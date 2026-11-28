@@ -2,6 +2,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/google-calendar/callback", "destination": "/api/index?route=/api/google-calendar/callback" },
+    { "source": "/api/public/meetings/:path*", "destination": "/api/index?route=/api/public/meetings/:path*" },
+    { "source": "/api/admin/meetings/:path*", "destination": "/api/index?route=/api/admin/meetings/:path*" },
     { "source": "/api/admin/portfolio/clients/:clientId", "destination": "/api/index?route=/api/admin/portfolio/clients/:clientId" },
     { "source": "/api/about/founder-image", "destination": "/api/index?route=/api/about/founder-image" },
     { "source": "/api/public/payment", "destination": "/api/index?route=/api/public/payment" },
@@ -15,6 +18,7 @@
     { "source": "/api/settings/contact", "destination": "/api/index?route=/api/settings/contact" },
     { "source": "/api/settings/socials", "destination": "/api/index?route=/api/settings/socials" },
     { "source": "/admin/login", "destination": "/admin/login/index.html" },
+    { "source": "/book-meeting", "destination": "/book-meeting.html" },
     { "source": "/about-us", "destination": "/index.html" },
     { "source": "/packages", "destination": "/index.html" },
     { "source": "/performance", "destination": "/index.html" },
