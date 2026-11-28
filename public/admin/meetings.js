@@ -176,7 +176,8 @@
   navButton.dataset.navIcon = 'calendar';
   navButton.addEventListener('click', () => window.showAdminPanel('meetingsPanel', navButton, 'Meetings'));
   const portfolioButton = [...nav.querySelectorAll('button')].find(button => button.textContent.trim() === 'Portfolio');
-  (portfolioButton || nav.lastElementChild).after(navButton);
+  const billingButton = nav.querySelector('[data-nav-icon="billing"]');
+  (billingButton || portfolioButton || nav.lastElementChild).after(navButton);
 
   const originalShowAdminPanel = window.showAdminPanel;
   window.showAdminPanel = (id, button, title) => {
@@ -343,8 +344,8 @@
         type: 'booking',
         id: booking.id,
         eventId: booking.google_event_id,
-        title: booking.title,
-        detail: `${booking.attendee_name} · ${booking.attendee_email}`,
+        title: booking.attendee_name || booking.title,
+        detail: booking.attendee_email,
         start: booking.start_at,
         end: booking.end_at,
         meetUrl: booking.meet_url,
