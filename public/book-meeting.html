@@ -8,8 +8,28 @@
   <style>
     :root{color-scheme:dark;--bg:#080b10;--panel:#11161f;--line:#28313d;--gold:#efc24c;--muted:#91a0b7}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0,#1a1b18 0,#080b10 55%);color:#e5eaf2;font:15px/1.5 Inter,"DM Sans",Arial,sans-serif}
-    main{width:min(760px,calc(100% - 28px));margin:42px auto;padding:32px;border:1px solid var(--line);border-radius:14px;background:#10151deF;box-shadow:0 20px 70px #0007}
-    .brand{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+    .header{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 5%;background:#080808ed;backdrop-filter:blur(16px);border-bottom:1px solid #171717}
+    .site-brand{display:flex;align-items:center;gap:10px;color:#f7f5ef;font-family:Georgia,serif;font-size:14px;font-weight:600;letter-spacing:2px;white-space:nowrap}
+    .site-brand img{display:block;width:38px;height:42px;object-fit:contain}
+    .site-brand b{color:var(--gold)}
+    .desktop-nav{display:flex;align-items:center;gap:clamp(12px,2vw,25px)}
+    .desktop-nav a,.side-menu-nav a{color:#c8c5bd;text-decoration:none}
+    .desktop-nav a:hover,.desktop-nav a.active,.side-menu-nav a:hover{color:var(--gold)}
+    .header-actions{display:flex;align-items:center;gap:12px}
+    .header-actions .choose-now{display:inline-flex;width:auto;padding:10px 15px;border-radius:4px;background:linear-gradient(135deg,#f4d47b,#d6ad43);color:#111;font-size:12px;font-weight:700;text-decoration:none}
+    .hamburger{display:none;width:42px;height:42px;padding:0;border:1px solid #292719;border-radius:8px;background:#0b0b0b}
+    .hamburger span{display:block;width:18px;height:2px;margin:4px auto;background:#f5d77a}
+    .side-menu-backdrop{position:fixed;inset:0;z-index:49;display:none;background:#0009}
+    .side-menu{position:fixed;top:0;right:-100%;z-index:50;display:flex;width:min(82vw,320px);height:100vh;flex-direction:column;padding:20px 18px;border-left:1px solid var(--line);background:#0d0d0d;transition:right .25s ease}
+    .side-menu-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+    .side-menu-head .site-brand{font-size:12px}
+    .menu-close{width:auto;padding:0 8px;border:0;background:transparent;color:#fff;font-size:30px}
+    .side-menu-nav{display:flex;flex-direction:column;gap:8px}
+    .side-menu-nav a{padding:9px 5px;border-bottom:1px solid #ffffff0f}
+    body.menu-open .side-menu-backdrop{display:block}
+    body.menu-open .side-menu{right:0}
+    main{width:min(760px,calc(100% - 28px));margin:34px auto;padding:32px;border:1px solid var(--line);border-radius:14px;background:#10151deF;box-shadow:0 20px 70px #0007}
+    .booking-brand{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
     h1{margin:10px 0;color:#f1f3f6;font:600 clamp(28px,5vw,40px)/1.2 Georgia,serif}
     p{color:var(--muted)}label{display:block;margin:12px 0 5px;color:#bec8d6;font-size:13px}
     input,select,textarea,button{width:100%;padding:12px;background:#0b0f15;color:#e5eaf2;border:1px solid #35404d;border-radius:6px;font:inherit}
@@ -21,12 +41,33 @@
     .notice{margin:14px 0;padding:12px;border:1px solid #3b3422;border-radius:6px;background:#17140d;color:#e3cf8a}
     .error{border-color:#713b3b;background:#1a1011;color:#ffb4a9}.success{border-color:#345d43;background:#0d1912;color:#b1e6bf}
     .hidden{display:none!important}.hint{font-size:12px}.submit{margin-top:14px}
-    a{color:var(--gold)}@media(max-width:600px){main{margin:16px auto;padding:22px 16px}.booking-grid{grid-template-columns:1fr}}
+    a{color:var(--gold)}@media(max-width:850px){.desktop-nav{display:none}.hamburger{display:block}}
+    @media(max-width:600px){.header{padding:10px 4%}.site-brand{gap:7px;font-size:11px;letter-spacing:1px}.site-brand img{width:34px;height:38px}.header-actions .choose-now{display:none}main{margin:16px auto;padding:22px 16px}.booking-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
+  <header class="header">
+    <a class="site-brand" href="/" aria-label="Trishul Capital home"><picture><source media="(max-width: 700px)" srcset="/images/trident-gold.png"><img src="/images/trident.png" alt=""></picture><span>TRISHUL <b>CAPITAL</b></span></a>
+    <nav class="desktop-nav" aria-label="Main navigation">
+      <a href="/">Home</a><a href="/portfolio">Portfolio</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a class="active" href="/book-meeting">Book Your Slot</a>
+    </nav>
+    <div class="header-actions">
+      <a class="choose-now" href="/packages">Choose Now</a>
+      <button class="hamburger" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+    </div>
+  </header>
+  <button class="side-menu-backdrop" type="button" aria-label="Close menu"></button>
+  <aside class="side-menu" aria-label="Mobile navigation">
+    <div class="side-menu-head">
+      <a class="site-brand" href="/" aria-label="Trishul Capital home"><img src="/images/trident.png" alt=""><span>TRISHUL <b>CAPITAL</b></span></a>
+      <button class="menu-close" type="button" aria-label="Close menu">×</button>
+    </div>
+    <nav class="side-menu-nav" aria-label="Mobile navigation links">
+      <a href="/">Home</a><a href="/portfolio">Portfolio</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/book-meeting">Book Your Slot</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a>
+    </nav>
+  </aside>
   <main>
-    <div class="brand">Trishul Capital</div>
+    <div class="booking-brand">Trishul Capital</div>
     <h1>Schedule a meeting</h1>
     <p>Choose an available time. You’ll receive a Google Calendar invitation with your Google Meet link.</p>
     <div id="bookingMessage" class="notice hidden" role="status"></div>
