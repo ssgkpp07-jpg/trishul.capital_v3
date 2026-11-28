@@ -43,6 +43,7 @@ function Header(){
         <a class="${active('/portfolio')}" href="/portfolio">Portfolio</a>
         <a class="${active('/packages')}" href="/packages">Packages</a>
         <a class="${active('/performance')}" href="/performance">Performance</a>
+        <a class="book-slot-link${active('/book-meeting')}" href="/book-meeting">Book Your Slot</a>
       </nav>
       <div class="header-actions">
         <a class="gold-btn small" href="/packages">Choose Now</a>
@@ -62,7 +63,7 @@ function Header(){
         <a href="/portfolio">Portfolio</a>
         <a href="/packages">Packages</a>
         <a href="/performance">Performance</a>
-        <a href="/book-meeting">Book a Meeting</a>
+        <a href="/book-meeting">Book Your Slot</a>
         <a href="/about-us">About Us</a>
         <a href="/contact">Contact Us</a>
         <a href="/contact-card">Contact Card</a>
@@ -77,7 +78,7 @@ function Header(){
 function Footer(){
   return `<footer>
     <div class="footer-brand"><img class="footer-logo" src="/images/trident.png" alt="Trishul Capital"><h3><span>TRISHUL</span> <b>CAPITAL</b></h3><p>Systematic automated trading solutions with transparent performance tracking.</p></div>
-    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/book-meeting">Book a Meeting</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
+    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/book-meeting">Book Your Slot</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
     <div><h4>Connect</h4><div id="footerConnect" class="footer-connect"></div></div>
     <div class="footer-meta">
       <div class="copyright">© ${new Date().getFullYear()} Trishul Capital. All rights reserved.</div>
@@ -91,6 +92,39 @@ function MarketTicker(){
   return `<section class="ticker market-ticker" aria-label="Indicative market prices">
     <div class="ticker-track" aria-live="off">${quotes.map((instrument,index)=>`<div class="ticker-quote" data-market-symbol="${instrument.symbol}"${index>=marketInstruments.length?' aria-hidden="true"':''}><span>${instrument.symbol}</span><strong data-market-price="${instrument.symbol}">Loading…</strong><small>USD</small></div>`).join('')}</div>
     <p class="ticker-market-note" data-market-status>Indicative market prices · provider updates may be delayed · refreshing every 30 seconds</p>
+  </section>`;
+}
+
+function HomeBookingCalendar(){
+  const today=new Date();
+  const year=today.getFullYear();
+  const month=today.getMonth();
+  const monthName=new Intl.DateTimeFormat(undefined,{month:'long',year:'numeric'}).format(today);
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const cells=[
+    ...Array.from({length:firstDay},()=>'<span class="booking-mini-day empty" aria-hidden="true"></span>'),
+    ...Array.from({length:daysInMonth},(_,index)=>{
+      const day=index+1;
+      return day===today.getDate()
+        ?`<span class="booking-mini-day current" aria-current="date">${day}</span>`
+        :`<span class="booking-mini-day">${day}</span>`;
+    })
+  ];
+  while(cells.length%7)cells.push('<span class="booking-mini-day empty" aria-hidden="true"></span>');
+  return `<section class="section booking-calendar-section">
+    <div class="booking-calendar-layout">
+      <div class="booking-calendar-copy"><span class="eyebrow">MEET WITH TRISHUL CAPITAL</span><h2>Choose a day to <span>connect.</span></h2>
+        <p>View the current month at a glance, then book a time that works for you. Your confirmed meeting will include a Google Meet link.</p>
+      </div>
+      <article class="booking-calendar-card" aria-label="${monthName} calendar">
+        <div class="booking-calendar-month"><strong>${monthName}</strong><span>THIS MONTH</span></div>
+        <div class="booking-calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+        <div class="booking-calendar-days">${cells.join('')}</div>
+        <p class="booking-calendar-today">Today · ${new Intl.DateTimeFormat(undefined,{weekday:'long',month:'long',day:'numeric'}).format(today)}</p>
+        <a class="gold-btn booking-slot-cta" href="/book-meeting">Book Your Slot</a>
+      </article>
+    </div>
   </section>`;
 }
 
@@ -400,7 +434,7 @@ function TermsPage(){
 }
 
 async function Home(){
- return `${Hero()}${SystemSection()}${StepsSection()}${WhySection()}${StrategySection()}<section class="section home-cta"><div class="cta-card scroll-reveal reveal-up"><span class="eyebrow">READY TO BEGIN?</span><h2>Choose your <span>automated system.</span></h2><p>Explore the free Gold EA and Combo EA packages or view live account performance.</p><div class="actions"><a class="gold-btn" href="/packages">View Packages</a><a class="outline-btn" href="/performance">View Performance</a></div></div></section>`;
+ return `${Hero()}${HomeBookingCalendar()}${SystemSection()}${StepsSection()}${WhySection()}${StrategySection()}<section class="section home-cta"><div class="cta-card scroll-reveal reveal-up"><span class="eyebrow">READY TO BEGIN?</span><h2>Choose your <span>automated system.</span></h2><p>Explore the free Gold EA and Combo EA packages or view live account performance.</p><div class="actions"><a class="gold-btn" href="/packages">View Packages</a><a class="outline-btn" href="/performance">View Performance</a></div></div></section>`;
 }
 
 function setupHomeScrollReveal(){
@@ -514,6 +548,7 @@ document.addEventListener('click',e=>{
   if(!a||a.target==='_blank'||!a.href.startsWith(location.origin))return;
   const u=new URL(a.href);
   if(u.pathname.startsWith('/api'))return;
+  if(u.pathname.replace(/\/$/,'')==='/book-meeting')return;
   e.preventDefault();
   document.body.classList.remove('menu-open');
   history.pushState({},'',u.pathname + u.search + u.hash);
