@@ -209,4 +209,4 @@ async function addSocial(){let platform=$('sp').value==='Custom'?$('customSp').v
 async function saveContact(){for(const [key,value] of [['contact_email',$('email').value],['contact_whatsapp',$('wa').value],['contact_telegram',$('tg').value]])await api('/api/admin/settings',{method:'PUT',body:JSON.stringify({key,value})});alert('Contact details saved')}
 function logout(){token='';sessionStorage.removeItem('trishul_admin_token');document.body.classList.remove('admin-authenticated');$('app').classList.add('hidden');$('login').classList.remove('hidden')}
 const saved=sessionStorage.getItem('trishul_admin_token');if(saved){token=saved;api('/api/admin/accounts').then(()=>{document.body.classList.add('admin-authenticated');$('login').classList.add('hidden');$('app').classList.remove('hidden');load()}).catch(()=>sessionStorage.removeItem('trishul_admin_token'))}
-</script><script src="/admin/billing.js"></script></body></html>
+</script><script src="/admin/billing.js"></script><script src="/admin/meetings.js"></script></body></html>
