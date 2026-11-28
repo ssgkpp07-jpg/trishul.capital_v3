@@ -27,6 +27,13 @@
     .billing-status{display:inline-block;padding:5px 8px;border:1px solid #404957;border-radius:20px;color:#c4cfdd;font-size:11px;white-space:nowrap}
     .billing-status-paid,.billing-status-settled{border-color:#31533d;color:#9be0ad}
     .billing-status-pending{border-color:#705b24;color:#f2d781}
+    .billing-status-upcoming-soon{border-color:#ff5a64;color:#ffdadd;background:rgba(248,59,73,.12);box-shadow:0 0 6px rgba(248,59,73,.62),0 0 18px rgba(248,59,73,.28);animation:billing-status-red-glow 1.8s ease-in-out infinite}
+    .billing-status-pending-soon{border-color:#d8b143;color:#ffe69a;background:rgba(216,177,67,.12);box-shadow:0 0 6px rgba(216,177,67,.62),0 0 18px rgba(216,177,67,.28)}
+    .billing-due-countdown{display:inline-block;margin-top:5px;padding:3px 6px;border:1px solid #404957;border-radius:4px;font-size:11px;line-height:1.2;white-space:nowrap}
+    .billing-due-countdown-upcoming{border-color:#633b35;color:#ff888d;background:#1a0f12}
+    .billing-due-countdown-pending{border-color:#705b24;color:#f2d781;background:#17140b}
+    @keyframes billing-status-red-glow{0%,100%{box-shadow:0 0 4px rgba(248,59,73,.45),0 0 13px rgba(248,59,73,.18)}50%{box-shadow:0 0 8px rgba(248,59,73,.8),0 0 20px rgba(248,59,73,.36)}}
+    @media(prefers-reduced-motion:reduce){.billing-status-upcoming-soon{animation:none}}
     .billing-status-overdue{border-color:#633b35;color:#ffb4a9}
     .billing-error{color:#ffb4a9}
     .billing-pdf-dialog{width:min(1050px,calc(100vw - 28px));height:min(92vh,900px);max-width:none;max-height:92vh;padding:18px;background:#11161f;color:#e5eaf2;border:1px solid #424b59;border-radius:10px}
@@ -330,6 +337,21 @@
     return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
   }
 
+  function billingDaysUntilDue(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!match) return null;
+    const [, yearText, monthText, dayText] = match;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const dueTimestamp = Date.UTC(year, month - 1, day);
+    const dueDate = new Date(dueTimestamp);
+    if (dueDate.getUTCFullYear() !== year || dueDate.getUTCMonth() !== month - 1 || dueDate.getUTCDate() !== day) return null;
+    const now = new Date();
+    const todayTimestamp = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.floor((dueTimestamp - todayTimestamp) / 86400000);
+  }
+
   function formatBillingDateTime(value) {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
@@ -337,14 +359,16 @@
       : `${formatBillingDate(value)} ${date.toLocaleTimeString()}`;
   }
 
-  function statusBadge(status, overdue = false) {
+  function statusBadge(status, overdue = false, dueSoon = false) {
     const label = status === 'paid' || status === 'settled' ? 'Settled'
       : status === 'pending' ? 'Pending'
         : overdue ? 'Due / uninvoiced' : 'Upcoming';
     const style = status === 'paid' || status === 'settled' ? 'billing-status-settled'
       : status === 'pending' ? 'billing-status-pending'
         : overdue ? 'billing-status-overdue' : '';
-    return `<span class="billing-status ${style}">${label}</span>`;
+    const dueSoonStyle = dueSoon && status === 'pending' ? 'billing-status-pending-soon'
+      : dueSoon && status === 'upcoming' ? 'billing-status-upcoming-soon' : '';
+    return `<span class="${['billing-status', style, dueSoonStyle].filter(Boolean).join(' ')}">${label}</span>`;
   }
 
   function updateWeekOptions() {
@@ -443,16 +467,21 @@
   function renderBillingSchedule() {
     const rows = document.getElementById('billingScheduleRows');
     rows.innerHTML = serverCycles.filter(cycle => cycle.status === 'upcoming' || cycle.status === 'pending').map(cycle => {
+      const daysUntilDue = billingDaysUntilDue(cycle.due_date);
+      const dueSoon = daysUntilDue !== null && daysUntilDue >= 0 && daysUntilDue <= 7;
       const action = cycle.invoice_id
         ? `<button type="button" class="portfolio-action" onclick="previewBillingPdf(${Number(cycle.invoice_id)})">Preview invoice</button>`
         : `<button type="button" class="portfolio-action" onclick="prepareServerBillingInvoice('${encodeURIComponent(cycle.client_id).replace(/'/g, '%27')}','${encodeURIComponent(cycle.account_numbers[0]).replace(/'/g, '%27')}','${cycle.due_date}')">Create invoice</button>`;
+      const countdown = dueSoon
+        ? `<br><span class="billing-due-countdown billing-due-countdown-${cycle.status}">${daysUntilDue === 0 ? 'Due today' : `Due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`}</span>`
+        : '';
       return `<tr>
         <td>${formatBillingDate(cycle.due_date)}${cycle.overdue && cycle.status === 'upcoming' ? '<br><span class="billing-error">Due</span>' : ''}</td>
         <td>${escapeHtml(cycle.client_id)} · ${escapeHtml(cycle.client_name)}<br><span class="muted">${escapeHtml(cycle.client_email || cycle.client_phone || '')}</span></td>
         <td>${escapeHtml(cycle.account_numbers[0])}</td>
         <td>${cycle.amount_usd == null ? '<span class="muted">Set in invoice</span>' : moneyUsd(cycle.amount_usd)}</td>
         <td>${cycle.amount_inr == null ? '<span class="muted">Set in invoice</span>' : moneyInr(cycle.amount_inr)}</td>
-        <td>${statusBadge(cycle.status, cycle.overdue)}</td><td><div class="billing-actions">${action}</div></td>
+        <td>${statusBadge(cycle.status, cycle.overdue, dueSoon)}${countdown}</td><td><div class="billing-actions">${action}</div></td>
       </tr>`;
     }).join('') || '<tr><td colspan="7">No upcoming or pending server billing cycles.</td></tr>';
   }
