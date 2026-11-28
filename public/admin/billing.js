@@ -51,6 +51,15 @@
     .billing-image-field{padding:12px;border:1px solid #252e3a;border-radius:8px;background:#11161f}
     .billing-settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     .billing-settings-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .billing-settings-group{grid-column:1/-1;padding:14px;border:1px solid #252e3a;border-radius:8px;background:#11161f}
+    .billing-settings-group h4{margin:0 0 12px;color:#f0c95e}
+    .billing-payment-setting-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .billing-payment-setting-card{padding:12px;border:1px solid #303a48;border-radius:8px;background:#0d1219}
+    .billing-payment-setting-card h5{margin:0 0 10px;color:#e5eaf2}
+    .billing-payment-setting-card .billing-settings-grid{margin:0;gap:10px}
+    .billing-payment-setting-card .full{grid-column:1/-1}
+    .billing-payment-setting-card .billing-image-preview{max-width:90px;max-height:90px}
+    .billing-payment-setting-card .billing-image-field{grid-column:1/-1}
     .billing-settings-grid textarea{min-height:84px;resize:vertical}
     .billing-checkbox{display:flex!important;align-items:center;gap:8px;margin:10px 0}
     .billing-checkbox input{width:auto!important}
@@ -61,7 +70,7 @@
     .billing-sort:hover,.billing-sort:focus-visible{color:#f0c95e}
     .billing-sort:focus-visible{outline:2px solid #d8b143;outline-offset:3px;border-radius:2px}
     @media(max-width:850px){.billing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-filters,.billing-payment-grid{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
+    @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-payment-setting-list,.billing-filters,.billing-payment-grid{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
     .admin-nav button:nth-child(4)::before{content:"$"}
     .admin-nav button:nth-child(5)::before{content:"◉"}
     .admin-nav button:nth-child(6)::before{content:"⚙"}
@@ -146,29 +155,33 @@
       <p class="billing-table-note">These details are saved with each new invoice, so later setting changes do not alter existing PDFs.</p>
       <form id="billingSettingsForm">
         <div class="billing-settings-grid">
-          <div class="billing-image-field"><label for="billingLogoUpload">Invoice logo (PNG, JPEG, or WebP)</label><img id="billingLogoPreview" class="billing-image-preview" alt="Invoice logo preview"><input id="billingLogoUpload" type="file" accept="image/png,image/jpeg,image/webp"></div>
-          <div class="billing-image-field"><label for="billingQrUpload">UPI QR code (PNG, JPEG, or WebP)</label><img id="billingQrPreview" class="billing-image-preview" alt="UPI QR code preview"><input id="billingQrUpload" type="file" accept="image/png,image/jpeg,image/webp"></div>
-          <div class="billing-image-field"><label for="billingCryptoQrUpload">Crypto QR code (PNG, JPEG, or WebP)</label><img id="billingCryptoQrPreview" class="billing-image-preview" alt="Crypto QR code preview"><input id="billingCryptoQrUpload" type="file" accept="image/png,image/jpeg,image/webp"></div>
-          <div><label for="billingSettingsUpi">UPI ID / payment code</label><input id="billingSettingsUpi" maxlength="200"></div>
-          <div><label for="billingSettingsCryptoCoin">Crypto coin / token</label><input id="billingSettingsCryptoCoin" maxlength="50" placeholder="e.g. USDT"></div>
-          <div><label for="billingSettingsCryptoNetwork">Crypto network</label><input id="billingSettingsCryptoNetwork" maxlength="100" placeholder="e.g. Binance-BEP20 or Tron-TRC20"></div>
-          <div style="grid-column:1/-1"><label for="billingSettingsCryptoWallet">Crypto wallet address</label><input id="billingSettingsCryptoWallet" maxlength="1000"></div>
-          <div><label for="billingSettingsBankAccount">Account number</label><input id="billingSettingsBankAccount" maxlength="100"></div>
-          <div><label for="billingSettingsAccountName">Account name</label><input id="billingSettingsAccountName" maxlength="200"></div>
-          <div><label for="billingSettingsBankName">Bank name</label><input id="billingSettingsBankName" maxlength="200"></div>
-          <div><label for="billingSettingsBranch">Branch</label><input id="billingSettingsBranch" maxlength="200"></div>
-          <div><label for="billingSettingsIfsc">IFSC code</label><input id="billingSettingsIfsc" maxlength="50"></div>
-          <div><label for="billingSettingsCompany">Company name</label><input id="billingSettingsCompany" maxlength="200" required></div>
-          <div><label for="billingSettingsPhone">Phone number</label><input id="billingSettingsPhone" maxlength="100"></div>
-          <div><label for="billingSettingsEmail">Email address</label><input id="billingSettingsEmail" type="email" maxlength="200"></div>
-          <div style="grid-column:1/-1"><label for="billingSettingsAddress">From address</label><textarea id="billingSettingsAddress" maxlength="1000"></textarea></div>
+          <div class="billing-settings-group"><h4>Company details</h4><div class="billing-settings-grid">
+            <div class="billing-image-field"><label for="billingLogoUpload">Company logo (PNG, JPEG, or WebP)</label><img id="billingLogoPreview" class="billing-image-preview" alt="Company logo preview"><input id="billingLogoUpload" type="file" accept="image/png,image/jpeg,image/webp"></div>
+            <div><label for="billingSettingsCompany">Company name</label><input id="billingSettingsCompany" maxlength="200" required></div>
+            <div><label for="billingSettingsEmail">Email address</label><input id="billingSettingsEmail" type="email" maxlength="200"></div>
+            <div><label for="billingSettingsPhone">Phone number</label><input id="billingSettingsPhone" maxlength="100"></div>
+            <div style="grid-column:1/-1"><label for="billingSettingsAddress">Business address</label><textarea id="billingSettingsAddress" maxlength="1000"></textarea></div>
+          </div></div>
+          <div class="billing-settings-group"><h4>UPI payment methods</h4><p class="billing-table-note">Each UPI method and its QR code appears as a separate choice after the customer clicks Pay Now.</p><div id="billingUpiPaymentList" class="billing-payment-setting-list"></div><button type="button" class="portfolio-action" id="billingAddUpiPayment">＋ Add UPI payment</button></div>
+          <div class="billing-settings-group"><h4>Bank transfer</h4><div class="billing-settings-grid">
+            <div><label for="billingSettingsBankAccount">Account number</label><input id="billingSettingsBankAccount" maxlength="100"></div>
+            <div><label for="billingSettingsAccountName">Account name</label><input id="billingSettingsAccountName" maxlength="200"></div>
+            <div><label for="billingSettingsBankName">Bank name</label><input id="billingSettingsBankName" maxlength="200"></div>
+            <div><label for="billingSettingsBranch">Branch</label><input id="billingSettingsBranch" maxlength="200"></div>
+            <div><label for="billingSettingsIfsc">IFSC code</label><input id="billingSettingsIfsc" maxlength="50"></div>
+          </div></div>
+          <div class="billing-settings-group"><h4>Crypto payment methods</h4><p class="billing-table-note">Each coin, network, wallet, and QR appears as a separate choice after the customer clicks Pay Now.</p><div id="billingCryptoPaymentList" class="billing-payment-setting-list"></div><button type="button" class="portfolio-action" id="billingAddCryptoPayment">＋ Add crypto payment</button></div>
         </div>
-        <div class="billing-settings-actions"><button type="button" class="portfolio-action" id="billingSettingsPreview">Preview PDF layout</button><button type="submit" class="portfolio-action">Save Invoice Settings</button></div>
+        <div class="billing-settings-actions"><button type="button" class="portfolio-action" id="billingSettingsPreview">Preview invoice PDF</button><button type="button" class="portfolio-action" id="billingPaymentPagePreview">Preview payment page</button><button type="submit" class="portfolio-action">Save Invoice Settings</button></div>
       </form>
     </section>
     <dialog id="billingPdfDialog" class="billing-pdf-dialog" aria-labelledby="billingPdfTitle">
       <div class="billing-pdf-dialog-header"><h2 id="billingPdfTitle">Invoice PDF preview</h2><button type="button" class="portfolio-action" id="billingPdfClose">Close</button></div>
       <iframe id="billingPdfFrame" title="Generated invoice PDF preview"></iframe>
+    </dialog>
+    <dialog id="billingPaymentPageDialog" class="billing-pdf-dialog" aria-labelledby="billingPaymentPageTitle">
+      <div class="billing-pdf-dialog-header"><h2 id="billingPaymentPageTitle">Customer payment page preview</h2><button type="button" class="portfolio-action" id="billingPaymentPageClose">Close</button></div>
+      <iframe id="billingPaymentPageFrame" title="Customer payment page preview"></iframe>
     </dialog>
     <dialog id="billingPaymentDialog" class="billing-payment-dialog" aria-labelledby="billingPaymentTitle">
       <div class="billing-pdf-dialog-header"><h2 id="billingPaymentTitle">Record payment</h2><button type="button" class="portfolio-action" id="billingPaymentClose" aria-label="Close payment dialog">Close</button></div>
@@ -280,8 +293,6 @@
   const accountSelect = document.getElementById('billingAccountNumber');
   const message = document.getElementById('billingMsg');
   const fileLogo = document.getElementById('billingLogoUpload');
-  const fileQr = document.getElementById('billingQrUpload');
-  const fileCryptoQr = document.getElementById('billingCryptoQrUpload');
   let invoices = [];
   let auditInvoices = [];
   let billingAccounts = [];
@@ -582,10 +593,6 @@
 
   function renderSettings() {
     const fields = {
-      billingSettingsUpi: 'upi_id',
-      billingSettingsCryptoCoin: 'crypto_coin',
-      billingSettingsCryptoNetwork: 'crypto_network',
-      billingSettingsCryptoWallet: 'crypto_wallet_address',
       billingSettingsBankAccount: 'bank_account_number',
       billingSettingsAccountName: 'bank_account_name',
       billingSettingsBankName: 'bank_name',
@@ -599,10 +606,40 @@
     for (const [id, key] of Object.entries(fields)) document.getElementById(id).value = billingSettings[key] ?? '';
     document.getElementById('billingLogoPreview').src = billingSettings.logo_data_url || '/admin/assets/invoice-logo.webp';
     document.getElementById('billingLogoPreview').classList.toggle('hidden', !billingSettings.logo_data_url);
-    document.getElementById('billingQrPreview').src = billingSettings.upi_qr_data_url || '';
-    document.getElementById('billingQrPreview').classList.toggle('hidden', !billingSettings.upi_qr_data_url);
-    document.getElementById('billingCryptoQrPreview').src = billingSettings.crypto_qr_data_url || '';
-    document.getElementById('billingCryptoQrPreview').classList.toggle('hidden', !billingSettings.crypto_qr_data_url);
+    billingSettings.upi_payments = Array.isArray(billingSettings.upi_payments) ? billingSettings.upi_payments : [];
+    billingSettings.crypto_payments = Array.isArray(billingSettings.crypto_payments) ? billingSettings.crypto_payments : [];
+    renderPaymentSettingsList('upi');
+    renderPaymentSettingsList('crypto');
+  }
+
+  function renderPaymentSettingsList(type) {
+    const list = document.getElementById(type === 'upi' ? 'billingUpiPaymentList' : 'billingCryptoPaymentList');
+    const entries = billingSettings[type === 'upi' ? 'upi_payments' : 'crypto_payments'];
+    list.innerHTML = entries.map((entry, index) => {
+      const upi = type === 'upi';
+      const fields = upi
+        ? [['payee_name', 'UPI Payee Name', 200, ''], ['upi_id', 'UPI ID', 200, 'name@bank']]
+        : [['coin', 'Coin / token', 50, 'e.g. USDT'], ['network', 'Network', 100, 'e.g. Binance-BEP20 or Tron-TRC20'], ['wallet_address', 'Wallet address', 1000, '']];
+      const fieldMarkup = fields.map(([key, label, maxLength, placeholder]) => `
+        <div class="${!upi && key === 'wallet_address' ? 'full' : ''}">
+          <label for="${type}-${index}-${key}">${label}</label>
+          <input id="${type}-${index}-${key}" data-payment-field="${key}" maxlength="${maxLength}" ${upi && key === 'upi_id' ? 'pattern="[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}"' : ''} required placeholder="${placeholder}" value="${escapeHtml(entry[key] || '')}">
+        </div>`).join('');
+      const qr = entry.qr_data_url || '';
+      return `<article class="billing-payment-setting-card" data-payment-entry="${type}">
+        <h5>${upi ? 'UPI' : 'Crypto'} payment ${index + 1}</h5>
+        <div class="billing-settings-grid">${fieldMarkup}
+          <div class="billing-image-field"><label for="${type}-${index}-qr">${upi ? 'UPI' : 'Crypto'} QR code (PNG, JPEG, or WebP)</label>
+            <img data-qr-preview data-data-url="${escapeHtml(qr)}" class="billing-image-preview${qr ? '' : ' hidden'}" alt="${upi ? 'UPI' : 'Crypto'} QR preview">
+            <input id="${type}-${index}-qr" data-qr-upload type="file" accept="image/png,image/jpeg,image/webp">
+          </div>
+        </div>
+        <button type="button" class="danger portfolio-action" data-remove-payment="${type}" data-index="${index}">Remove ${upi ? 'UPI' : 'crypto'} payment</button>
+      </article>`;
+    }).join('');
+    list.querySelectorAll('[data-qr-preview]').forEach(image => {
+      image.src = image.dataset.dataUrl || '';
+    });
   }
 
   async function blobToPngDataUrl(blob) {
@@ -631,10 +668,6 @@
 
   function readSettingsForm() {
     const fields = {
-      upi_id: 'billingSettingsUpi',
-      crypto_coin: 'billingSettingsCryptoCoin',
-      crypto_network: 'billingSettingsCryptoNetwork',
-      crypto_wallet_address: 'billingSettingsCryptoWallet',
       bank_account_number: 'billingSettingsBankAccount',
       bank_account_name: 'billingSettingsAccountName',
       bank_name: 'billingSettingsBankName',
@@ -646,7 +679,34 @@
       company_address: 'billingSettingsAddress'
     };
     for (const [key, id] of Object.entries(fields)) billingSettings[key] = document.getElementById(id).value.trim();
+    billingSettings.upi_payments = readPaymentSettingsList('upi');
+    billingSettings.crypto_payments = readPaymentSettingsList('crypto');
     return billingSettings;
+  }
+
+  function readPaymentSettingsList(type) {
+    const list = document.getElementById(type === 'upi' ? 'billingUpiPaymentList' : 'billingCryptoPaymentList');
+    return [...list.querySelectorAll('[data-payment-entry]')].map(entry => {
+      const value = {};
+      entry.querySelectorAll('[data-payment-field]').forEach(input => {
+        value[input.dataset.paymentField] = input.value.trim();
+      });
+      value.qr_data_url = entry.querySelector('[data-qr-preview]')?.dataset.dataUrl || '';
+      return value;
+    });
+  }
+
+  function addPaymentSettingsEntry(type) {
+    readSettingsForm();
+    const key = type === 'upi' ? 'upi_payments' : 'crypto_payments';
+    if (billingSettings[key].length >= 20) {
+      setBillingMessage(`You can add no more than 20 ${type} payment methods.`, true);
+      return;
+    }
+    billingSettings[key].push(type === 'upi'
+      ? { payee_name: '', upi_id: '', qr_data_url: '' }
+      : { coin: '', network: '', wallet_address: '', qr_data_url: '' });
+    renderPaymentSettingsList(type);
   }
 
   function saveSettingsForm() {
@@ -792,6 +852,89 @@
       document.getElementById('billingPdfDialog').showModal();
     } catch (error) {
       setBillingMessage(error.message, true);
+    }
+  }
+
+  function buildPaymentPagePreviewData(settings) {
+    const usdAmount = Number(document.getElementById('billingWithdrawalProfit').value || 0)
+      * Number(document.getElementById('billingSplit').value || 0) / 100
+      + Number(document.getElementById('billingMaintenance').value || 0)
+      + [...document.querySelectorAll('.billing-line-amount')]
+        .reduce((sum, input) => sum + Number(input.value || 0), 0);
+    const rate = Number(document.getElementById('billingRate').value || settings.usd_inr_rate || 100);
+    const invoiceUsd = usdAmount > 0 ? usdAmount : 6;
+    const invoiceAmount = Math.round(invoiceUsd * rate * 100) / 100;
+    const methods = (settings.upi_payments || []).map((entry, index) => ({
+      ...entry, id: `upi-${index + 1}`, type: 'upi'
+    }));
+    if (settings.bank_account_name && settings.bank_account_number
+      && (settings.bank_name || settings.bank_ifsc)) {
+      methods.push({
+        type: 'bank',
+        account_name: settings.bank_account_name,
+        account_number: settings.bank_account_number,
+        bank_name: settings.bank_name,
+        branch: settings.bank_branch,
+        ifsc: settings.bank_ifsc
+      });
+    }
+    methods.push(...(settings.crypto_payments || []).map((entry, index) => ({
+      ...entry, id: `crypto-${index + 1}`, type: 'crypto'
+    })));
+    return {
+      invoice_number: 'INV-TC-PREVIEW',
+      account_number: 'PREVIEW-001',
+      issue_date: new Date().toISOString().slice(0, 10),
+      amount: invoiceAmount,
+      usd_amount: invoiceUsd,
+      payment_status: 'pending',
+      company: {
+        name: settings.company_name,
+        email: settings.company_email,
+        phone: settings.company_phone,
+        address: settings.company_address,
+        logo_data_url: settings.logo_data_url
+      },
+      methods
+    };
+  }
+
+  function previewPaymentPage() {
+    try {
+      if (!document.getElementById('billingSettingsForm').reportValidity()) return;
+      const settings = readSettingsForm();
+      const payment = buildPaymentPagePreviewData(settings);
+      if (!payment.methods.length) throw new Error('Add at least one complete payment method to preview the payment page.');
+      const dialog = document.getElementById('billingPaymentPageDialog');
+      const frame = document.getElementById('billingPaymentPageFrame');
+      frame.addEventListener('load', () => {
+        frame.contentWindow.postMessage({ type: 'billing-payment-preview', payment }, window.location.origin);
+      }, { once: true });
+      frame.src = `/pay/index.html?preview=1&v=${Date.now()}`;
+      dialog.showModal();
+    } catch (error) {
+      setBillingMessage(error.message, true);
+    }
+  }
+
+  async function convertPaymentQrUpload(input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setBillingMessage('Choose a PNG, JPEG, or WebP QR image.', true);
+      input.value = '';
+      return;
+    }
+    try {
+      const image = input.closest('[data-payment-entry]').querySelector('[data-qr-preview]');
+      image.dataset.dataUrl = await blobToPngDataUrl(file);
+      image.src = image.dataset.dataUrl;
+      image.classList.remove('hidden');
+      setBillingMessage('QR image ready. Save Invoice Settings to apply it to new invoices.');
+    } catch (error) {
+      setBillingMessage(error.message, true);
+    } finally {
+      input.value = '';
     }
   }
 
@@ -998,6 +1141,10 @@
     if (billingPdfPreviewUrl) URL.revokeObjectURL(billingPdfPreviewUrl);
     billingPdfPreviewUrl = '';
   });
+  document.getElementById('billingPaymentPageClose').addEventListener('click', () => document.getElementById('billingPaymentPageDialog').close());
+  document.getElementById('billingPaymentPageDialog').addEventListener('close', () => {
+    document.getElementById('billingPaymentPageFrame').removeAttribute('src');
+  });
   document.getElementById('billingPaymentClose').addEventListener('click', () => document.getElementById('billingPaymentDialog').close());
   document.getElementById('billingPaymentCancel').addEventListener('click', () => document.getElementById('billingPaymentDialog').close());
   document.getElementById('billingPaymentDialog').addEventListener('close', () => {
@@ -1033,9 +1180,24 @@
     button.addEventListener('click', () => switchBillingView(button.dataset.billingViewButton))
   );
   fileLogo.addEventListener('change', () => convertUpload(fileLogo, 'logo_data_url', 'billingLogoPreview'));
-  fileQr.addEventListener('change', () => convertUpload(fileQr, 'upi_qr_data_url', 'billingQrPreview'));
-  fileCryptoQr.addEventListener('change', () => convertUpload(fileCryptoQr, 'crypto_qr_data_url', 'billingCryptoQrPreview'));
+  document.getElementById('billingAddUpiPayment').addEventListener('click', () => addPaymentSettingsEntry('upi'));
+  document.getElementById('billingAddCryptoPayment').addEventListener('click', () => addPaymentSettingsEntry('crypto'));
+  for (const [type, id] of [['upi', 'billingUpiPaymentList'], ['crypto', 'billingCryptoPaymentList']]) {
+    const list = document.getElementById(id);
+    list.addEventListener('change', event => {
+      if (event.target.matches('[data-qr-upload]')) convertPaymentQrUpload(event.target);
+    });
+    list.addEventListener('click', event => {
+      const button = event.target.closest('[data-remove-payment]');
+      if (!button) return;
+      readSettingsForm();
+      const key = type === 'upi' ? 'upi_payments' : 'crypto_payments';
+      billingSettings[key].splice(Number(button.dataset.index), 1);
+      renderPaymentSettingsList(type);
+    });
+  }
   document.getElementById('billingSettingsPreview').addEventListener('click', previewBillingSettingsPdf);
+  document.getElementById('billingPaymentPagePreview').addEventListener('click', previewPaymentPage);
   document.getElementById('billingSettingsForm').addEventListener('submit', async event => {
     event.preventDefault();
     try {
