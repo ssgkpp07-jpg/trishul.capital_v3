@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
-import { buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings, normalizeInvoicePaymentDetails } from '../billing.js';
+import { buildPublicBillingPaymentDetails, buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings, normalizeInvoicePaymentDetails, verifyBillingPaymentToken } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
 
 let supabaseClient;
@@ -117,6 +117,17 @@ export default async function handler(req, res) {
   try {
     if (method === 'GET' && path === '/api/health') {
       return res.status(200).json({ ok: true, service: 'trishul-capital-api' });
+    }
+
+    if (method === 'GET' && path === '/api/public/payment') {
+      const paymentToken = verifyBillingPaymentToken(req.query?.token);
+      if (!paymentToken) return res.status(404).json({ message: 'Payment link is invalid or expired.' });
+      const { data: invoice, error } = await supabase.from('billing_invoices').select('*')
+        .eq('id', paymentToken.id).eq('invoice_number', paymentToken.invoice_number)
+        .is('deleted_at', null).maybeSingle();
+      if (error) throw error;
+      if (!invoice) return res.status(404).json({ message: 'Invoice payment details are unavailable.' });
+      return res.status(200).json({ payment: buildPublicBillingPaymentDetails(invoice) });
     }
 
     if (method === 'GET' && path === '/api/market-quotes') {
