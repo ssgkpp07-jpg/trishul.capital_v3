@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Schedule a meeting with Trishul Capital.">
+  <title>Book a Meeting | Trishul Capital</title>
+  <style>
+    :root{color-scheme:dark;--bg:#080b10;--panel:#11161f;--line:#28313d;--gold:#efc24c;--muted:#91a0b7}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0,#1a1b18 0,#080b10 55%);color:#e5eaf2;font:15px/1.5 Inter,"DM Sans",Arial,sans-serif}
+    main{width:min(760px,calc(100% - 28px));margin:42px auto;padding:32px;border:1px solid var(--line);border-radius:14px;background:#10151deF;box-shadow:0 20px 70px #0007}
+    .brand{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+    h1{margin:10px 0;color:#f1f3f6;font:600 clamp(28px,5vw,40px)/1.2 Georgia,serif}
+    p{color:var(--muted)}label{display:block;margin:12px 0 5px;color:#bec8d6;font-size:13px}
+    input,select,textarea,button{width:100%;padding:12px;background:#0b0f15;color:#e5eaf2;border:1px solid #35404d;border-radius:6px;font:inherit}
+    textarea{min-height:90px;resize:vertical}button{background:var(--gold);border:0;color:#111;font-weight:700;cursor:pointer}
+    button:disabled{opacity:.5;cursor:default}.booking-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+    .slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:12px 0}
+    .slot{padding:10px;border:1px solid #3a4655;background:#0c1118;color:#dce5f1;font-size:13px}
+    .slot[aria-pressed=true]{border-color:var(--gold);background:#262115;color:#ffe08b}
+    .notice{margin:14px 0;padding:12px;border:1px solid #3b3422;border-radius:6px;background:#17140d;color:#e3cf8a}
+    .error{border-color:#713b3b;background:#1a1011;color:#ffb4a9}.success{border-color:#345d43;background:#0d1912;color:#b1e6bf}
+    .hidden{display:none!important}.hint{font-size:12px}.submit{margin-top:14px}
+    a{color:var(--gold)}@media(max-width:600px){main{margin:16px auto;padding:22px 16px}.booking-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">Trishul Capital</div>
+    <h1>Schedule a meeting</h1>
+    <p>Choose an available time. You’ll receive a Google Calendar invitation with your Google Meet link.</p>
+    <div id="bookingMessage" class="notice hidden" role="status"></div>
+    <form id="bookingForm">
+      <div class="booking-grid">
+        <div><label for="bookingDate">Choose a date</label><input id="bookingDate" type="date" required></div>
+        <div><label for="bookingTimezone">Your time zone</label><select id="bookingTimezone"></select></div>
+      </div>
+      <p class="hint" id="slotStatus">Select a date to view available times.</p>
+      <div id="availableSlots" class="slots" aria-label="Available meeting times"></div>
+      <input id="selectedStart" type="hidden">
+      <input id="selectedEnd" type="hidden">
+      <div class="booking-grid">
+        <div><label for="attendeeName">Your name</label><input id="attendeeName" maxlength="120" autocomplete="name" required></div>
+        <div><label for="attendeeEmail">Email for the invitation</label><input id="attendeeEmail" type="email" maxlength="254" autocomplete="email" required></div>
+      </div>
+      <label for="meetingTitle">Meeting topic</label><input id="meetingTitle" maxlength="160" required placeholder="What would you like to discuss?">
+      <label for="meetingNotes">Additional details (optional)</label><textarea id="meetingNotes" maxlength="2000"></textarea>
+      <button id="submitBooking" class="submit" type="submit" disabled>Choose a time to continue</button>
+    </form>
+    <section id="bookingConfirmation" class="hidden"></section>
+  </main>
+  <script src="/meetings-booking.js"></script>
+</body>
+</html>
