@@ -4,6 +4,7 @@
   "rewrites": [
     { "source": "/api/admin/portfolio/clients/:clientId", "destination": "/api/index?route=/api/admin/portfolio/clients/:clientId" },
     { "source": "/api/about/founder-image", "destination": "/api/index?route=/api/about/founder-image" },
+    { "source": "/api/public/payment", "destination": "/api/index?route=/api/public/payment" },
     { "source": "/api/admin/:path*", "destination": "/api/index?route=/api/admin/:path*" },
     { "source": "/api/contact-card/profile", "destination": "/api/index?route=/api/contact-card/profile" },
     { "source": "/api/contact-buttons", "destination": "/api/index?route=/api/contact-buttons" },
