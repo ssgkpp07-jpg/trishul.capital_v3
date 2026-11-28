@@ -4,6 +4,7 @@ import loginHandler from './login-handler.js';
 import { summarizePortfolio, summarizePortfolioMonths, buildPortfolioWorkbook, filterPortfolioEventsByDate } from '../portfolio.js';
 import { buildPublicBillingPaymentDetails, buildServerBillingSchedule, createBillingInvoice, createBillingPdf, formatBillingInvoiceNumber, getBillingPeriodDates, getDefaultBillingSettings, normalizeBillingSettings, normalizeInvoicePaymentDetails, verifyBillingPaymentToken } from '../billing.js';
 import { getMarketQuotes } from '../server/market-quotes.js';
+import { handleMeetingRequest } from './meetings.js';
 
 let supabaseClient;
 const getSupabase = () => {
@@ -66,14 +67,15 @@ const DEFAULT_PORTFOLIO_MESSAGE_TEMPLATES = {
   profit_withdrawn: 'Hello {{client_name}},\n\nYour profit withdrawal has been recorded successfully.\n\nClient ID: {{client_id}}\nAccount number: {{account_number}}\nProfit withdrawn: {{amount}}\nDate: {{date}}\n\nPlease contact us if you have any questions.\n\n— Trishul Capital'
 };
 
-const authorized = (req) => {
+const getAdminSubject = (req) => {
   try {
-    jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), secret);
-    return true;
+    const claims = jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), secret);
+    return typeof claims.sub === 'string' ? claims.sub : '';
   } catch {
-    return false;
+    return '';
   }
 };
+const authorized = req => Boolean(getAdminSubject(req));
 
 const performanceAccount = account => ({
   id: String(account.id),
@@ -118,6 +120,9 @@ export default async function handler(req, res) {
     if (method === 'GET' && path === '/api/health') {
       return res.status(200).json({ ok: true, service: 'trishul-capital-api' });
     }
+
+    const meetingResponse = await handleMeetingRequest(req, res, supabase, path, getAdminSubject(req));
+    if (meetingResponse !== false) return meetingResponse;
 
     if (method === 'GET' && path === '/api/public/payment') {
       const paymentToken = verifyBillingPaymentToken(req.query?.token);
