@@ -1,11 +1,12 @@
 import PDFDocument from 'pdfkit';
+import jwt from 'jsonwebtoken';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const roundMoney = amount => Math.round((amount + Number.EPSILON) * 100) / 100;
 const PAID_STAMP = readFileSync(path.join(process.cwd(), 'public', 'admin', 'assets', 'paid-stamp.png'));
 const BILLING_SETTING_FIELDS = [
-  'logo_data_url', 'upi_id', 'upi_qr_data_url', 'bank_account_number', 'bank_account_name',
+  'logo_data_url', 'upi_payee_name', 'upi_id', 'upi_qr_data_url', 'bank_account_number', 'bank_account_name',
   'bank_name', 'bank_branch', 'bank_ifsc', 'company_name', 'company_address',
   'company_phone', 'company_email', 'crypto_qr_data_url', 'crypto_wallet_address',
   'crypto_coin', 'crypto_network', 'monthly_server_fee_usd', 'usd_inr_rate'
@@ -15,8 +16,56 @@ const IMAGE_SIGNATURES = {
   'image/jpeg': buffer => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
 };
 const MAX_BILLING_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const MAX_PAYMENT_METHODS = 20;
+const PAYMENT_TOKEN_PURPOSE = 'billing-payment';
 const validIsoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value)
   && new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+const billingTokenSecret = () => process.env.JWT_SECRET || 'change-this-secret';
+
+function normalizePaymentQr(value, label) {
+  if (!value) return '';
+  if (typeof value !== 'string' || value.length > Math.ceil(MAX_BILLING_IMAGE_BYTES * 4 / 3) + 128) {
+    throw new Error(`${label} is too large.`);
+  }
+  const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) throw new Error(`${label} must be a PNG or JPEG image.`);
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length || buffer.length > MAX_BILLING_IMAGE_BYTES
+    || buffer.toString('base64') !== match[2] || !IMAGE_SIGNATURES[match[1]](buffer)) {
+    throw new Error(`${label} must be a valid PNG or JPEG image no larger than 1.5 MB.`);
+  }
+  return value;
+}
+
+function normalizePaymentEntries(entries, type) {
+  if (!Array.isArray(entries) || entries.length > MAX_PAYMENT_METHODS) {
+    throw new Error(`Add no more than ${MAX_PAYMENT_METHODS} ${type} payment methods.`);
+  }
+  return entries.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`${type} payment ${index + 1} must be an object.`);
+    }
+    const qr_data_url = normalizePaymentQr(entry.qr_data_url || '', `${type} payment ${index + 1} QR code`);
+    if (type === 'UPI') {
+      const payee_name = String(entry.payee_name || '').trim();
+      const upi_id = String(entry.upi_id || '').trim();
+      if (!payee_name && !upi_id && !qr_data_url) return null;
+      if (!payee_name || payee_name.length > 200) throw new Error(`Enter the payee name for UPI payment ${index + 1}.`);
+      if (!/^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$/.test(upi_id)) {
+        throw new Error(`Enter a valid UPI ID for payment ${index + 1}.`);
+      }
+      return { payee_name, upi_id, qr_data_url };
+    }
+    const coin = String(entry.coin || '').trim();
+    const network = String(entry.network || '').trim();
+    const wallet_address = String(entry.wallet_address || '').trim();
+    if (!coin && !network && !wallet_address && !qr_data_url) return null;
+    if (!coin || coin.length > 50) throw new Error(`Enter a coin or token for crypto payment ${index + 1}.`);
+    if (!network || network.length > 100) throw new Error(`Enter a network for crypto payment ${index + 1}.`);
+    if (!wallet_address || wallet_address.length > 1000) throw new Error(`Enter a wallet address for crypto payment ${index + 1}.`);
+    return { coin, network, wallet_address, qr_data_url };
+  }).filter(Boolean);
+}
 
 export function normalizeInvoicePaymentDetails(input = {}) {
   const paymentMethod = String(input.payment_method || '').trim().toLowerCase();
@@ -97,6 +146,7 @@ export function getDefaultBillingSettings() {
     company_address: process.env.COMPANY_ADDRESS || '',
     company_phone: process.env.COMPANY_PHONE || '',
     company_email: process.env.COMPANY_EMAIL || process.env.SMTP_USER || '',
+    upi_payee_name: '',
     crypto_qr_data_url: '',
     crypto_wallet_address: '',
     crypto_coin: '',
@@ -113,21 +163,7 @@ export function normalizeBillingSettings(input = {}) {
   for (const field of BILLING_SETTING_FIELDS) {
     const value = input[field] ?? defaults[field];
     if (field.endsWith('_data_url')) {
-      if (typeof value !== 'string' || value.length > Math.ceil(MAX_BILLING_IMAGE_BYTES * 4 / 3) + 128) {
-        throw new Error(`${field.replace(/_/g, ' ')} is too large.`);
-      }
-      if (!value) {
-        result[field] = '';
-        continue;
-      }
-      const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
-      if (!match) throw new Error('Invoice logo and payment QR codes must be PNG or JPEG images.');
-      const buffer = Buffer.from(match[2], 'base64');
-      if (!buffer.length || buffer.length > MAX_BILLING_IMAGE_BYTES
-        || buffer.toString('base64') !== match[2] || !IMAGE_SIGNATURES[match[1]](buffer)) {
-        throw new Error('Invoice logo and payment QR codes must be valid PNG or JPEG images no larger than 1.5 MB.');
-      }
-      result[field] = value;
+      result[field] = normalizePaymentQr(value, field.replace(/_/g, ' '));
       continue;
     }
     if (field === 'monthly_server_fee_usd' || field === 'usd_inr_rate') {
@@ -146,7 +182,120 @@ export function normalizeBillingSettings(input = {}) {
   if (result.company_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.company_email)) {
     throw new Error('Enter a valid company email address.');
   }
+  const upiFallback = result.upi_id || process.env.COMPANY_UPI_ID || '';
+  const upiPayeeFallback = result.upi_payee_name || result.bank_account_name || result.company_name;
+  const oldUpiEntry = upiFallback
+    ? [{ payee_name: upiPayeeFallback, upi_id: upiFallback, qr_data_url: result.upi_qr_data_url }]
+    : [];
+  const cryptoFallback = result.crypto_coin || result.crypto_network || result.crypto_wallet_address
+    ? [{
+      coin: result.crypto_coin,
+      network: result.crypto_network,
+      wallet_address: result.crypto_wallet_address,
+      qr_data_url: result.crypto_qr_data_url
+    }]
+    : [];
+  result.upi_payments = normalizePaymentEntries(input.upi_payments === undefined ? oldUpiEntry : input.upi_payments, 'UPI');
+  result.crypto_payments = normalizePaymentEntries(input.crypto_payments === undefined ? cryptoFallback : input.crypto_payments, 'crypto');
+  result.upi_payee_name = result.upi_payments[0]?.payee_name || '';
+  result.upi_id = result.upi_payments[0]?.upi_id || '';
+  result.upi_qr_data_url = result.upi_payments[0]?.qr_data_url || '';
+  result.crypto_coin = result.crypto_payments[0]?.coin || '';
+  result.crypto_network = result.crypto_payments[0]?.network || '';
+  result.crypto_wallet_address = result.crypto_payments[0]?.wallet_address || '';
+  result.crypto_qr_data_url = result.crypto_payments[0]?.qr_data_url || '';
   return result;
+}
+
+export function getBillingPaymentMethods(settings) {
+  const normalized = normalizeBillingSettings(settings);
+  const methods = normalized.upi_payments.map((entry, index) => ({
+    ...entry,
+    id: `upi-${index + 1}`,
+    type: 'upi'
+  }));
+  if (normalized.bank_account_name && normalized.bank_account_number
+    && (normalized.bank_name || normalized.bank_ifsc)) {
+    methods.push({
+      type: 'bank',
+      account_name: normalized.bank_account_name,
+      account_number: normalized.bank_account_number,
+      bank_name: normalized.bank_name,
+      branch: normalized.bank_branch,
+      ifsc: normalized.bank_ifsc
+    });
+  }
+  methods.push(...normalized.crypto_payments.map((entry, index) => ({
+    ...entry,
+    id: `crypto-${index + 1}`,
+    type: 'crypto'
+  })));
+  return methods;
+}
+
+export function getBillingInvoiceUsdAmount(invoice) {
+  let custom = invoice.custom_line_items || [];
+  if (typeof custom === 'string') {
+    try { custom = JSON.parse(custom); } catch { custom = []; }
+  }
+  const customUsd = (Array.isArray(custom) ? custom : [])
+    .reduce((sum, item) => sum + Number(item.amount_usd || 0), 0);
+  return roundMoney(Number(invoice.profit_share_usd || 0)
+    + Number(invoice.server_maintenance_usd || 0) + customUsd);
+}
+
+export function createBillingPaymentToken(invoice, secret = billingTokenSecret()) {
+  const id = Number(invoice?.id);
+  const invoiceNumber = String(invoice?.invoice_number || '');
+  if (!Number.isSafeInteger(id) || id < 1 || !invoiceNumber) return null;
+  return jwt.sign({ purpose: PAYMENT_TOKEN_PURPOSE, invoice_id: id, invoice_number: invoiceNumber }, secret);
+}
+
+export function verifyBillingPaymentToken(token, secret = billingTokenSecret()) {
+  try {
+    const payload = jwt.verify(String(token || ''), secret);
+    if (payload.purpose !== PAYMENT_TOKEN_PURPOSE
+      || !Number.isSafeInteger(payload.invoice_id) || payload.invoice_id < 1
+      || typeof payload.invoice_number !== 'string' || !payload.invoice_number) return null;
+    return { id: payload.invoice_id, invoice_number: payload.invoice_number };
+  } catch {
+    return null;
+  }
+}
+
+export function createBillingPaymentPageUrl(invoice, settings, siteUrl = process.env.PUBLIC_SITE_URL || 'https://trishul-capital-v3.vercel.app', secret = billingTokenSecret()) {
+  if (!getBillingPaymentMethods(settings).length) return null;
+  const token = createBillingPaymentToken(invoice, secret);
+  if (!token) return null;
+  let baseUrl;
+  try { baseUrl = new URL(siteUrl); } catch {
+    throw new Error('PUBLIC_SITE_URL must be a valid HTTPS URL.');
+  }
+  if (baseUrl.protocol !== 'https:' && !(baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(baseUrl.hostname))) {
+    throw new Error('PUBLIC_SITE_URL must use HTTPS.');
+  }
+  return `${baseUrl.origin}/pay/index.html?token=${encodeURIComponent(token)}`;
+}
+
+export function buildPublicBillingPaymentDetails(invoice) {
+  const settings = invoiceSettings(invoice);
+  return {
+    invoice_number: invoice.invoice_number,
+    account_number: invoice.account_number || '',
+    issue_date: invoice.issue_date,
+    due_date: invoice.due_date,
+    amount: Number(invoice.amount),
+    usd_amount: getBillingInvoiceUsdAmount(invoice),
+    payment_status: invoice.payment_status,
+    company: {
+      name: settings.company_name,
+      email: settings.company_email,
+      phone: settings.company_phone,
+      address: settings.company_address,
+      logo_data_url: settings.logo_data_url
+    },
+    methods: getBillingPaymentMethods(settings)
+  };
 }
 
 export function getBillingPeriodDates(input) {
@@ -603,64 +752,22 @@ export function createBillingPdf(invoice) {
     document.text(`INR ${Number(invoice.amount).toFixed(2)}`, right - 137, rowY + 10, { width: 127, align: 'right' });
     rowY += 45;
 
-    const qr = imageBuffer(settings.upi_qr_data_url);
-    const cryptoQr = imageBuffer(settings.crypto_qr_data_url);
-    const hasCryptoDetails = Boolean(cryptoQr || settings.crypto_wallet_address || settings.crypto_coin || settings.crypto_network);
-    if (rowY + (hasCryptoDetails ? 185 : 115) > 700) {
+    const hasPaymentMethods = getBillingPaymentMethods(settings).length > 0;
+    if (rowY + 70 > 700) {
       document.addPage();
       rowY = 55;
     }
-    const paymentPageUrl = createGooglePayPaymentPageUrl(invoice, settings);
-    document.fillColor('#4b515a').font('Helvetica-Bold').fontSize(8).text('PAYMENT DETAILS', left, rowY);
-    rowY += 15;
-    if (qr) document.image(qr, left, rowY, { fit: [90, 90] });
-    const bankDetails = [
-      settings.upi_id ? `UPI ID: ${settings.upi_id}` : '',
-      settings.bank_account_name ? `Account name: ${settings.bank_account_name}` : '',
-      settings.bank_account_number ? `Account number: ${settings.bank_account_number}` : '',
-      settings.bank_name ? `Bank: ${settings.bank_name}` : '',
-      settings.bank_branch ? `Branch: ${settings.bank_branch}` : '',
-      settings.bank_ifsc ? `IFSC: ${settings.bank_ifsc}` : ''
-    ].filter(Boolean);
-    const bankDetailsX = qr ? left + 105 : left;
-    const bankDetailsWidth = paymentPageUrl || invoice.payment_status === 'paid'
-      ? right - bankDetailsX - 212
-      : qr ? 300 : contentWidth;
-    document.font('Helvetica').fillColor('#333').fontSize(8).text(
-      bankDetails.length ? bankDetails.join('\n') : 'Contact us for payment instructions.',
-      bankDetailsX, rowY + 2, { width: bankDetailsWidth, lineGap: 4 }
-    );
+    const paymentPageUrl = createBillingPaymentPageUrl(invoice, settings);
     if (invoice.payment_status === 'paid') {
-      document.image(PAID_STAMP, right - 145, rowY - 2, { fit: [90, 80] });
-    } else if (paymentPageUrl) {
+      document.image(PAID_STAMP, right - 110, rowY - 4, { fit: [75, 65] });
+    } else if (hasPaymentMethods) {
       const buttonX = right - 200;
-      const buttonY = rowY + 2;
+      const buttonY = rowY + 5;
       document.roundedRect(buttonX, buttonY, 200, 42, 6).fill('#168447');
       document.fillColor('#fff').font('Helvetica-Bold').fontSize(9)
         .text('PAY NOW', buttonX + 8, buttonY + 6, { width: 184, align: 'center' })
         .fontSize(8).text(`INR ${Number(invoice.amount).toFixed(2)}`, buttonX + 8, buttonY + 22, { width: 184, align: 'center' });
-      document.link(buttonX, buttonY, 200, 42, paymentPageUrl);
-    }
-    let paymentDetailsBottom = rowY + 96;
-    if (hasCryptoDetails) {
-      const cryptoY = rowY + 105;
-      document.fillColor('#4b515a').font('Helvetica-Bold').fontSize(8).text('CRYPTO PAYMENT', left, cryptoY);
-      if (cryptoQr) document.image(cryptoQr, left, cryptoY + 14, { fit: [72, 72] });
-      const cryptoTextX = cryptoQr ? left + 86 : left;
-      const cryptoText = [
-        settings.crypto_coin ? `Coin: ${settings.crypto_coin}` : '',
-        settings.crypto_network ? `Network: ${settings.crypto_network}` : '',
-        settings.crypto_wallet_address ? `Wallet address: ${settings.crypto_wallet_address}` : ''
-      ].filter(Boolean);
-      document.font('Helvetica').fillColor('#333').fontSize(8).text(
-        cryptoText.join('\n') || 'Contact us for crypto payment details.',
-        cryptoTextX, cryptoY + 16, { width: right - cryptoTextX, lineGap: 4 }
-      );
-      paymentDetailsBottom = cryptoY + 92;
-    }
-    if (invoice.payment_status === 'paid') {
-      document.fillColor('#24743a').font('Helvetica-Bold').fontSize(8)
-        .text(formatPaidInvoiceDetails(invoice), left, Math.max(paymentDetailsBottom + 8, document.y + 10), { width: contentWidth });
+      if (paymentPageUrl) document.link(buttonX, buttonY, 200, 42, paymentPageUrl);
     }
 
     const footer = 'Please use the invoice number as your payment reference. This invoice is not a GST tax invoice unless applicable tax details are separately stated.';
