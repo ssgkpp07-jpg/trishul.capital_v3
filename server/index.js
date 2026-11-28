@@ -13,7 +13,7 @@ if(billingInvoiceSql.includes('UNIQUE(client_id,period_start,period_type)')||bil
  db.exec(`INSERT INTO billing_invoices(id,invoice_number,client_id,account_number,client_name,client_email,client_phone,client_address,issue_date,due_date,period_type,period_start,period_end,withdrawal_profit_usd,profit_split_percent,profit_share_usd,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,usd_inr_rate,amount,status,emailed_at,created_at) SELECT id,invoice_number,client_id,account_number,client_name,client_email,client_phone,client_address,issue_date,due_date,period_type,period_start,period_end,withdrawal_profit_usd,profit_split_percent,profit_share_usd,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items,usd_inr_rate,amount,status,emailed_at,created_at FROM billing_invoices_legacy`);
  db.exec('DROP TABLE billing_invoices_legacy');
 }
-for(const [column,definition] of [['billing_type',"TEXT NOT NULL DEFAULT 'standard'"],['server_billing_due_date','TEXT'],['invoice_settings',"TEXT NOT NULL DEFAULT '{}'"],['payment_status',"TEXT NOT NULL DEFAULT 'pending'"],['paid_at','TEXT'],['payment_method','TEXT'],['payment_gateway','TEXT'],['payment_upi_id','TEXT'],['payment_reference','TEXT'],['delivery_status',"TEXT NOT NULL DEFAULT 'not_sent'"],['deleted_at','TEXT']]){
+for(const [column,definition] of [['billing_type',"TEXT NOT NULL DEFAULT 'standard'"],['server_billing_due_date','TEXT'],['invoice_settings',"TEXT NOT NULL DEFAULT '{}'"],['payment_status',"TEXT NOT NULL DEFAULT 'pending'"],['paid_at','TEXT'],['payment_method','TEXT'],['payment_gateway','TEXT'],['payment_upi_id','TEXT'],['payment_coin','TEXT'],['payment_network','TEXT'],['payment_wallet_address','TEXT'],['payment_reference','TEXT'],['delivery_status',"TEXT NOT NULL DEFAULT 'not_sent'"],['deleted_at','TEXT']]){
  if(!db.prepare('PRAGMA table_info(billing_invoices)').all().some(item=>item.name===column))db.exec(`ALTER TABLE billing_invoices ADD COLUMN ${column} ${definition}`);
 }
 db.exec('DROP INDEX IF EXISTS billing_invoices_standard_period_idx;CREATE INDEX IF NOT EXISTS billing_invoices_standard_period_idx ON billing_invoices(client_id,period_start,period_type) WHERE billing_type=\'standard\' AND deleted_at IS NULL;DROP INDEX IF EXISTS billing_invoices_created_idx;CREATE INDEX IF NOT EXISTS billing_invoices_active_created_idx ON billing_invoices(created_at DESC,id DESC) WHERE deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_active_audit_idx ON billing_invoices(payment_status,due_date,id) WHERE deleted_at IS NULL;CREATE INDEX IF NOT EXISTS billing_invoices_client_period_idx ON billing_invoices(client_id,period_start DESC)');
@@ -331,12 +331,31 @@ app.put('/api/admin/billing/settings',auth,(req,res)=>{
  try{saveBillingSettings(settings);return res.json({settings})}
  catch(error){console.error('Unable to save invoice settings',error);return res.status(500).json({message:'Unable to save invoice settings.'})}
 });
+app.post('/api/admin/billing/preview',auth,async(req,res)=>{
+ let settings;
+ try{settings=normalizeBillingSettings(req.body?.settings)}catch(error){return res.status(400).json({message:error.message})}
+ const issueDate=new Date().toISOString().slice(0,10);
+ const dueDate=new Date(Date.now()+14*24*60*60*1000).toISOString().slice(0,10);
+ try{
+  const pdf=await createBillingPdf({
+   invoice_number:'INV-TC-PREVIEW',client_id:'PREVIEW',client_name:'Sample Client',client_email:'client@example.com',
+   client_phone:'',client_address:'Salem, Tamil Nadu, India',account_number:'TC-0001',
+   issue_date:issueDate,due_date:dueDate,period_type:'monthly',period_start:issueDate,period_end:dueDate,
+   withdrawal_profit_usd:0,profit_split_percent:0,profit_share_usd:0,profit_share_amount:0,
+   server_maintenance_usd:0,server_maintenance_amount:0,custom_line_items:[{description:'Invoice layout preview',amount_usd:10,amount_inr:900}],
+   usd_inr_rate:90,amount:900,payment_status:'pending',invoice_settings:settings
+  });
+  res.set('Content-Type','application/pdf');
+  res.set('Content-Disposition','inline; filename="invoice-preview.pdf"');
+  return res.send(pdf);
+ }catch(error){console.error('Unable to create invoice settings preview',error);return res.status(500).json({message:'Unable to create the invoice preview.'})}
+});
 app.get('/api/admin/billing/overview',auth,(req,res)=>{
  try{const settings=readBillingSettings();return res.json({settings,...buildServerBillingOverview(new Date().toISOString().slice(0,10),settings)})}
  catch(error){console.error('Unable to load server billing overview',error);return res.status(500).json({message:'Unable to load the server billing overview.'})}
 });
-app.get('/api/admin/billing/invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items FROM billing_invoices WHERE deleted_at IS NULL ORDER BY created_at DESC,id DESC LIMIT 100').all().map(readBillingInvoice)}));
-app.get('/api/admin/billing/audit',auth,(req,res)=>res.json({invoices:db.prepare('SELECT id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items FROM billing_invoices WHERE deleted_at IS NULL ORDER BY payment_status ASC,due_date ASC,created_at DESC LIMIT 500').all().map(readBillingInvoice)}));
+app.get('/api/admin/billing/invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items FROM billing_invoices WHERE deleted_at IS NULL ORDER BY created_at DESC,id DESC LIMIT 100').all().map(readBillingInvoice)}));
+app.get('/api/admin/billing/audit',auth,(req,res)=>res.json({invoices:db.prepare('SELECT id,invoice_number,client_id,account_number,billing_type,client_name,client_email,client_phone,due_date,period_type,period_start,period_end,amount,payment_status,paid_at,payment_method,payment_gateway,payment_upi_id,payment_coin,payment_network,payment_wallet_address,payment_reference,profit_share_amount,server_maintenance_usd,server_maintenance_amount,custom_line_items FROM billing_invoices WHERE deleted_at IS NULL ORDER BY payment_status ASC,due_date ASC,created_at DESC LIMIT 500').all().map(readBillingInvoice)}));
 app.get('/api/admin/billing/deleted-invoices',auth,(req,res)=>res.json({invoices:db.prepare('SELECT * FROM billing_invoices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC,id DESC').all().map(readBillingInvoice)}));
 app.post('/api/admin/billing/invoices',auth,(req,res)=>{
  const input=req.body||{},clientId=String(input.client_id||'').trim().toUpperCase();
@@ -396,7 +415,7 @@ app.post('/api/admin/billing/invoices/:id/paid',auth,(req,res)=>{
  if(invoice.payment_status==='paid')return res.status(409).json({message:'This invoice is already marked as paid.'});
  let paymentDetails;
  try{paymentDetails=normalizeInvoicePaymentDetails(req.body||{})}catch(error){return res.status(400).json({message:error.message})}
- db.prepare("UPDATE billing_invoices SET payment_status='paid',paid_at=@paid_at,payment_method=@payment_method,payment_gateway=@payment_gateway,payment_upi_id=@payment_upi_id,payment_reference=@payment_reference WHERE id=@id AND deleted_at IS NULL").run({...paymentDetails,paid_at:new Date().toISOString(),id});
+ db.prepare("UPDATE billing_invoices SET payment_status='paid',paid_at=@paid_at,payment_method=@payment_method,payment_gateway=@payment_gateway,payment_upi_id=@payment_upi_id,payment_coin=@payment_coin,payment_network=@payment_network,payment_wallet_address=@payment_wallet_address,payment_reference=@payment_reference WHERE id=@id AND deleted_at IS NULL").run({...paymentDetails,paid_at:new Date().toISOString(),id});
  return res.json({invoice:getBillingInvoice(id)});
 });
 app.put('/api/admin/billing/invoices/:id/payment-details',auth,(req,res)=>{
@@ -407,7 +426,7 @@ app.put('/api/admin/billing/invoices/:id/payment-details',auth,(req,res)=>{
  if(invoice.payment_status!=='paid')return res.status(409).json({message:'Only paid invoices can have their payment details edited.'});
  let paymentDetails;
  try{paymentDetails=normalizeInvoicePaymentDetails(req.body||{})}catch(error){return res.status(400).json({message:error.message})}
- db.prepare("UPDATE billing_invoices SET payment_method=@payment_method,payment_gateway=@payment_gateway,payment_upi_id=@payment_upi_id,payment_reference=@payment_reference WHERE id=? AND payment_status='paid' AND deleted_at IS NULL").run({...paymentDetails,id});
+ db.prepare("UPDATE billing_invoices SET payment_method=@payment_method,payment_gateway=@payment_gateway,payment_upi_id=@payment_upi_id,payment_coin=@payment_coin,payment_network=@payment_network,payment_wallet_address=@payment_wallet_address,payment_reference=@payment_reference WHERE id=? AND payment_status='paid' AND deleted_at IS NULL").run({...paymentDetails,id});
  return res.json({invoice:getBillingInvoice(id)});
 });
 app.delete('/api/admin/billing/invoices/:id',auth,(req,res)=>{
