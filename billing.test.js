@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createPaymentLinks } from './public/pay/payment.js';
 import {
@@ -9,11 +10,13 @@ import {
   createBillingPdf,
   formatBillingInvoiceNumber,
   formatPaidInvoiceDetails,
+  buildPublicBillingPaymentDetails,
   getNextBillingInvoiceSequence,
   getBillingPeriodDates,
   getMonthlyAnniversaryDate,
   getServerBillingDueDate,
   getServerBillingCycles,
+  normalizeBillingSettings,
   normalizeInvoicePaymentDetails,
   replaceInvoiceAccountNumber
 } from './billing.js';
@@ -156,7 +159,7 @@ test('invoice creation accepts manual WhatsApp-only sharing but requires an acco
   assert.throws(() => calculateBillingAmounts({ ...input, withdrawal_profit_usd: 0 }), /greater than zero/);
 });
 
-test('payment details validate UPI and bank transfer modes and preserve custom choices', () => {
+test('payment details validate UPI, bank, and crypto modes and preserve custom choices', () => {
   assert.deepEqual(normalizeInvoicePaymentDetails({
     payment_method: 'upi',
     payment_upi_id: 'client@upi',
@@ -166,7 +169,10 @@ test('payment details validate UPI and bank transfer modes and preserve custom c
     payment_method: 'upi',
     payment_gateway: 'PhonePe',
     payment_upi_id: 'client@upi',
-    payment_reference: 'UPI-123'
+    payment_reference: 'UPI-123',
+    payment_coin: null,
+    payment_network: null,
+    payment_wallet_address: null
   });
   assert.deepEqual(normalizeInvoicePaymentDetails({
     payment_method: 'upi',
@@ -177,7 +183,10 @@ test('payment details validate UPI and bank transfer modes and preserve custom c
     payment_method: 'upi',
     payment_gateway: 'BHIM',
     payment_upi_id: 'client@upi',
-    payment_reference: null
+    payment_reference: null,
+    payment_coin: null,
+    payment_network: null,
+    payment_wallet_address: null
   });
   assert.deepEqual(normalizeInvoicePaymentDetails({
     payment_method: 'bank_settled',
@@ -187,19 +196,89 @@ test('payment details validate UPI and bank transfer modes and preserve custom c
     payment_method: 'bank_settled',
     payment_gateway: 'NEFT',
     payment_upi_id: null,
-    payment_reference: 'UTR-456'
+    payment_reference: 'UTR-456',
+    payment_coin: null,
+    payment_network: null,
+    payment_wallet_address: null
   });
   assert.deepEqual(normalizeInvoicePaymentDetails({
     payment_method: 'bank_settled',
     bank_transfer_type: 'Other',
     bank_transfer_other: 'IMPS Transfer'
   }).payment_gateway, 'IMPS Transfer');
+  assert.deepEqual(normalizeInvoicePaymentDetails({
+    payment_method: 'crypto',
+    payment_coin: 'USDT',
+    payment_network: 'Tron-TRC20',
+    payment_wallet_address: 'TExampleWallet',
+    payment_reference: 'TX-789'
+  }), {
+    payment_method: 'crypto',
+    payment_gateway: null,
+    payment_upi_id: null,
+    payment_reference: 'TX-789',
+    payment_coin: 'USDT',
+    payment_network: 'Tron-TRC20',
+    payment_wallet_address: 'TExampleWallet'
+  });
+  assert.throws(() => normalizeInvoicePaymentDetails({
+    payment_method: 'crypto',
+    payment_coin: 'USDT',
+    payment_network: 'Tron-TRC20'
+  }), /wallet address/i);
   assert.throws(() => normalizeInvoicePaymentDetails({ payment_method: 'upi', payment_gateway: 'Other' }), /UPI ID/i);
   assert.throws(() => normalizeInvoicePaymentDetails({
     payment_method: 'bank_settled',
     bank_transfer_type: 'NEFT',
     payment_reference: 'x'.repeat(201)
   }), /200 characters/i);
+});
+
+test('invoice settings retain crypto payment details and QR images', () => {
+  const image = `data:image/png;base64,${readFileSync('public/admin/assets/paid-stamp.png').toString('base64')}`;
+  const settings = normalizeBillingSettings({
+    crypto_coin: 'USDT',
+    crypto_network: 'Binance-BEP20',
+    crypto_wallet_address: '0xExampleWallet',
+    crypto_qr_data_url: image
+  });
+  assert.equal(settings.crypto_coin, 'USDT');
+  assert.equal(settings.crypto_network, 'Binance-BEP20');
+  assert.equal(settings.crypto_wallet_address, '0xExampleWallet');
+  assert.equal(settings.crypto_qr_data_url, image);
+});
+
+test('invoice settings preserve multiple payment methods and expose them to the payment page', () => {
+  const image = `data:image/png;base64,${readFileSync('public/admin/assets/paid-stamp.png').toString('base64')}`;
+  const invoice = {
+    invoice_number: 'INV-TC-001/11/2026',
+    account_number: 'TC-1001',
+    issue_date: '2026-11-26',
+    amount: 900,
+    payment_status: 'pending',
+    profit_share_usd: 9,
+    invoice_settings: normalizeBillingSettings({
+      company_name: 'Example Capital',
+      company_email: 'billing@example.com',
+      bank_account_name: 'Example Capital',
+      bank_account_number: '123456789',
+      bank_name: 'Example Bank',
+      upi_payments: [
+        { payee_name: 'Example Payee', upi_id: 'payee@bank', qr_data_url: image },
+        { payee_name: 'Alternate Payee', upi_id: 'alternate@bank', qr_data_url: '' }
+      ],
+      crypto_payments: [
+        { coin: 'USDT', network: 'Binance-BEP20', wallet_address: '0xExampleWallet', qr_data_url: image }
+      ]
+    })
+  };
+  const payment = buildPublicBillingPaymentDetails(invoice);
+  assert.equal(payment.company.name, 'Example Capital');
+  assert.equal(payment.methods.length, 4);
+  assert.deepEqual(payment.methods.map(method => method.type), ['upi', 'upi', 'bank', 'crypto']);
+  assert.equal(payment.methods[0].qr_data_url, image);
+  assert.equal(payment.methods[3].network, 'Binance-BEP20');
+  assert.equal(payment.usd_amount, 9);
 });
 
 test('paid invoice details include the selected method, gateway, and reference', () => {
@@ -209,12 +288,20 @@ test('paid invoice details include the selected method, gateway, and reference',
     payment_upi_id: 'merchant@upi',
     paid_at: '2026-11-26T12:00:00.000Z',
     payment_reference: 'UPI-123'
-  }), 'Paid via UPI · Google Pay · UPI ID: merchant@upi · Verified on: 2026-11-26 · Reference: UPI-123');
+  }), 'Paid via UPI · Google Pay · UPI ID: merchant@upi · Verified on: 26/11/2026 · Reference: UPI-123');
   assert.equal(formatPaidInvoiceDetails({
     payment_method: 'bank_settled',
     payment_gateway: 'NEFT',
     payment_reference: 'UTR-456'
   }), 'Bank settled · NEFT · Reference: UTR-456');
+  assert.equal(formatPaidInvoiceDetails({
+    payment_method: 'crypto',
+    payment_coin: 'USDT',
+    payment_network: 'Binance-BEP20',
+    payment_wallet_address: '0xExample',
+    paid_at: '2026-11-26T12:00:00.000Z',
+    payment_reference: 'TX-789'
+  }), 'Paid via Crypto · USDT · Binance-BEP20 · Wallet: 0xExample · Verified on: 26/11/2026 · Reference: TX-789');
   assert.equal(formatPaidInvoiceDetails({ payment_method: 'manual_verification' }), 'Payment verified manually');
 });
 
@@ -357,18 +444,33 @@ test('invoice PDF generation returns a PDF document', async () => {
   assert.equal(invoice.account_number, 'ACC-1');
   const pdf = await createBillingPdf({
     ...invoice,
-    invoice_settings: { ...invoice.invoice_settings, upi_id: 'merchant@okaxis' },
+    invoice_settings: {
+      ...invoice.invoice_settings,
+      upi_id: 'merchant@okaxis',
+      crypto_coin: 'USDT',
+      crypto_network: 'Tron-TRC20',
+      crypto_wallet_address: 'TExampleWallet',
+      crypto_qr_data_url: `data:image/png;base64,${readFileSync('public/admin/assets/paid-stamp.png').toString('base64')}`
+    },
     payment_status: 'paid',
     paid_at: '2026-11-21T12:00:00.000Z',
+    payment_method: 'crypto',
+    payment_coin: 'USDT',
+    payment_network: 'Tron-TRC20',
+    payment_wallet_address: 'TExampleWallet',
     payment_reference: 'TEST-REFERENCE'
   });
   assert.equal(pdf.subarray(0, 4).toString('ascii'), '%PDF');
   assert.equal(pdf.includes(Buffer.from('/pay/index.html?')), false);
-  assert.ok(pdf.includes(Buffer.from('/Subtype /Image')));
+  assert.ok((pdf.toString('latin1').match(/\/Subtype \/Image/g) || []).length >= 2);
 
   const pendingPdf = await createBillingPdf({
     ...invoice,
-    invoice_settings: { ...invoice.invoice_settings, upi_id: 'merchant@okaxis' },
+    id: 1,
+    invoice_settings: {
+      ...invoice.invoice_settings,
+      upi_payments: [{ payee_name: 'Example Payee', upi_id: 'merchant@okaxis', qr_data_url: '' }]
+    },
     payment_status: 'pending'
   });
   assert.ok(pendingPdf.includes(Buffer.from('/pay/index.html?')));
