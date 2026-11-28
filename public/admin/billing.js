@@ -78,14 +78,6 @@
     .billing-sort:focus-visible{outline:2px solid #d8b143;outline-offset:3px;border-radius:2px}
     @media(max-width:850px){.billing-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:560px){.billing-form,.billing-settings-grid,.billing-payment-setting-list,.billing-filters,.billing-payment-grid{grid-template-columns:1fr}.billing-custom-line{grid-template-columns:1fr}.billing-summary{gap:8px}.billing-card{padding:12px}.billing-card strong{font-size:17px}}
-    .admin-nav button:nth-child(4)::before{content:"$"}
-    .admin-nav button:nth-child(5)::before{content:"◉"}
-    .admin-nav button:nth-child(6)::before{content:"⚙"}
-    .admin-nav button:nth-child(7)::before{content:"▧"}
-    .admin-nav button:nth-child(8)::before{content:"◫"}
-    .admin-nav button:nth-child(9)::before{content:"✉"}
-    .admin-nav button:nth-child(10)::before{content:"✉"}
-    .admin-nav button:nth-child(11)::before{content:"⌫"}
   `;
   document.head.append(styles);
 
@@ -252,6 +244,7 @@
   const billingButton = document.createElement('button');
   billingButton.type = 'button';
   billingButton.textContent = 'Billing';
+  billingButton.dataset.navIcon = 'billing';
   billingButton.addEventListener('click', () => window.showAdminPanel('billingPanel', billingButton, 'Billing'));
   portfolioButton.after(billingButton);
 
