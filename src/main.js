@@ -62,6 +62,7 @@ function Header(){
         <a href="/portfolio">Portfolio</a>
         <a href="/packages">Packages</a>
         <a href="/performance">Performance</a>
+        <a href="/book-meeting">Book a Meeting</a>
         <a href="/about-us">About Us</a>
         <a href="/contact">Contact Us</a>
         <a href="/contact-card">Contact Card</a>
@@ -76,7 +77,7 @@ function Header(){
 function Footer(){
   return `<footer>
     <div class="footer-brand"><img class="footer-logo" src="/images/trident.png" alt="Trishul Capital"><h3><span>TRISHUL</span> <b>CAPITAL</b></h3><p>Systematic automated trading solutions with transparent performance tracking.</p></div>
-    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
+    <div><h4>Navigation</h4><a href="/">Home</a><a href="/packages">Packages</a><a href="/performance">Performance</a><a href="/portfolio">Portfolio</a><a href="/book-meeting">Book a Meeting</a><a href="/about-us">About Us</a><a href="/contact">Contact Us</a><a href="/contact-card">Contact Card</a><a href="/terms-conditions">Terms &amp; Condition</a><a href="/privacy-policy">Privacy Policy</a><a href="/risk-policy">Risk Policy</a></div>
     <div><h4>Connect</h4><div id="footerConnect" class="footer-connect"></div></div>
     <div class="footer-meta">
       <div class="copyright">© ${new Date().getFullYear()} Trishul Capital. All rights reserved.</div>
@@ -316,7 +317,7 @@ async function ContactPage(){
    { key: 'Instagram', value: '@trishulcapital', href: instagram, icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.37 2h9.26A5.38 5.38 0 0 1 22 7.37v9.26A5.38 5.38 0 0 1 16.63 22H7.37A5.38 5.38 0 0 1 2 16.63V7.37A5.38 5.38 0 0 1 7.37 2Zm-.2 1.81a3.35 3.35 0 0 0-3.36 3.36v9.66a3.35 3.35 0 0 0 3.36 3.36h9.66a3.35 3.35 0 0 0 3.36-3.36V7.17a3.35 3.35 0 0 0-3.36-3.36H7.17ZM17.59 5.17a1.21 1.21 0 1 1 0 2.42 1.21 1.21 0 0 1 0-2.42ZM12 6.89A5.11 5.11 0 1 1 6.89 12 5.11 5.11 0 0 1 12 6.89Zm0 1.81A3.3 3.3 0 1 0 15.3 12 3.3 3.3 0 0 0 12 8.7Z" fill="currentColor"/></svg>' },
    { key: 'Telegram', value: '@Trishul_Capital', href: telegram, icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.42 4.33a1.56 1.56 0 0 0-1.62-.22L2.47 10.8a1.1 1.1 0 0 0 .08 2.07l4.32 1.35 1.67 5.12a1.1 1.1 0 0 0 1.84.43l2.45-2.61 4.25 3.11a1.56 1.56 0 0 0 2.43-.92l2.22-13.48a1.56 1.56 0 0 0-.31-1.53ZM8.18 13.61l8.72-5.5-7.31 6.97-.29 2.28-1.12-3.43Z" fill="currentColor"/></svg>' }
  ];
- return `<section class="section page-section contact"><div><span class="eyebrow">CONTACT US</span><h2>Let’s build a <span>systematic approach.</span></h2><p>For EA access, account management enquiries or general questions, contact Trishul Capital.</p></div><div class="contact-card">${labels.map(item => `<p class="contact-row"><span class="contact-label"><span class="contact-icon">${item.icon}</span><b>${esc(item.key)}</b></span><br><a href="${esc(item.href)}" target="_blank" rel="noopener">${esc(item.value)}</a></p>`).join('')}</div></section>`;
+ return `<section class="section page-section contact"><div><span class="eyebrow">CONTACT US</span><h2>Let’s build a <span>systematic approach.</span></h2><p>For EA access, account management enquiries or general questions, contact Trishul Capital.</p><a class="gold-btn" href="/book-meeting">Book a meeting</a></div><div class="contact-card">${labels.map(item => `<p class="contact-row"><span class="contact-label"><span class="contact-icon">${item.icon}</span><b>${esc(item.key)}</b></span><br><a href="${esc(item.href)}" target="_blank" rel="noopener">${esc(item.value)}</a></p>`).join('')}</div></section>`;
 }
 
 async function ContactCardPage(){
@@ -370,6 +371,7 @@ function PrivacyPolicyPage(){
     {title:'Smart Risk Management', text:'The EA is designed with <strong>Stop Loss and Take Profit protection</strong> to help manage risk and automatically secure predefined trade targets without requiring constant manual monitoring.'},
     {title:'Smart Trailing Stop Logic', text:'Our EA also incorporates a <strong>smart trailing-stop system</strong> that dynamically adjusts the Stop Loss as the trade moves in a favorable direction. This is designed to protect accumulated profits while allowing profitable trades room to continue running.'},
     {title:'Account Management Service', text:'Your trading account can be managed using the automated strategy, allowing the system to monitor and execute trades according to its programmed trading conditions.'},
+    {title:'Meeting Scheduling', text:'When you book a meeting, we collect your name, email address, selected time, and any details you provide. This information is stored to manage the appointment. The event and invitation are processed through the connected Google Calendar account, and the attendee receives a Google Calendar invitation with meeting details.'},
     {title:'Client Data Security', text:'The client&#39;s details are safe and secured.'}
   ];
   return PolicyPage('Privacy Policy', 'Your data and trading process are handled with care and transparency.', items);
